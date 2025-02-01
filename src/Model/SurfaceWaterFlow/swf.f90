@@ -14,6 +14,7 @@ module SwfModule
   use SwfIcModule, only: SwfIcType
   use SwfDfwModule, only: SwfDfwType
   use SwfCxsModule, only: SwfCxsType
+  use SwfJncModule, only: SwfJncType
   use SwfStoModule, only: SwfStoType
   use SwfObsModule, only: SwfObsType, swf_obs_cr
   use SwfOcModule, only: SwfOcType
@@ -29,6 +30,7 @@ module SwfModule
     type(SwfIcType), pointer :: ic => null() ! initial conditions package
     type(SwfDfwType), pointer :: dfw => null() !< diffusive wave package
     type(SwfCxsType), pointer :: cxs => null() !< cross section package
+    type(SwfJncType), pointer :: jnc => null() !< junction package
     type(SwfStoType), pointer :: sto => null() !< storage package
     type(SwfObsType), pointer :: obs => null() ! observation package
     type(SwfOcType), pointer :: oc => null() !< output control package
@@ -36,6 +38,7 @@ module SwfModule
     integer(I4B), pointer :: inic => null() ! unit number IC
     integer(I4B), pointer :: indfw => null() !< unit number DFW
     integer(I4B), pointer :: incxs => null() !< unit number CXS
+    integer(I4B), pointer :: injnc => null() !< unit number JNC
     integer(I4B), pointer :: insto => null() !< STO enabled flag
     integer(I4B), pointer :: inobs => null() ! unit number OBS
     integer(I4B), pointer :: inoc => null() !< unit number OC
@@ -119,6 +122,7 @@ contains
     ! allocate members that are part of model class
     call mem_allocate(this%inic, 'INIC', this%memoryPath)
     call mem_allocate(this%indfw, 'INDFW', this%memoryPath)
+    call mem_allocate(this%injnc, 'INJNC', this%memoryPath)
     call mem_allocate(this%incxs, 'INCXS', this%memoryPath)
     call mem_allocate(this%insto, 'INSTO', this%memoryPath)
     call mem_allocate(this%inobs, 'INOBS', this%memoryPath)
@@ -129,6 +133,7 @@ contains
     ! initialize
     this%inic = 0
     this%indfw = 0
+    this%injnc = 1  ! todo hardwired!
     this%incxs = 0
     this%insto = 0
     this%inobs = 0
@@ -188,10 +193,16 @@ contains
     ! Allocate model arrays, now that neq and nja are known
     call this%allocate_arrays()
 
+    ! Allow the junction package to increase neq
+    this%injnc = 1
+    if (this%injnc > 0) then
+      call this%jnc%jnc_df(this%neq, this%dis)
+    end if
+
     ! Define packages and assign iout for time series managers
     do ip = 1, this%bndlist%Count()
       packobj => GetBndFromList(this%bndlist, ip)
-      call packobj%bnd_df(this%dis%nodes, this%dis)
+      call packobj%bnd_df(this%neq, this%dis)
     end do
 
     ! Store information needed for observations
@@ -794,6 +805,7 @@ contains
     ! Scalars
     call mem_deallocate(this%inic)
     call mem_deallocate(this%indfw)
+    call mem_deallocate(this%injnc)
     call mem_deallocate(this%incxs)
     call mem_deallocate(this%insto)
     call mem_deallocate(this%inobs)
@@ -1007,6 +1019,7 @@ contains
     use Dis2dModule, only: dis2d_cr
     use Disv2dModule, only: disv2d_cr
     use SwfDfWModule, only: dfw_cr
+    use SwfJncModule, only: jnc_cr
     use SwfCxsModule, only: cxs_cr
     use SwfStoModule, only: sto_cr
     use SwfIcModule, only: ic_cr
@@ -1032,6 +1045,7 @@ contains
     integer(I4B) :: indis = 0 ! DIS enabled flag
     character(len=LENMEMPATH) :: mempathic = ''
     character(len=LENMEMPATH) :: mempathdfw = ''
+    character(len=LENMEMPATH) :: mempathjnc = ''
     character(len=LENMEMPATH) :: mempathcxs = ''
     character(len=LENMEMPATH) :: mempathsto = ''
 
@@ -1066,6 +1080,9 @@ contains
       case ('DFW6')
         this%indfw = 1
         mempathdfw = mempath
+      case ('JNC6')
+        this%injnc = 1
+        mempathjnc = mempath
       case ('CXS6')
         this%incxs = 1
         mempathcxs = mempath
@@ -1096,6 +1113,10 @@ contains
                 this%dis)
     if (this%indfw > 0) then
       call dfw_cr(this%dfw, this%name, mempathdfw, this%indfw, this%iout, &
+                  this%cxs)
+    end if
+    if (this%injnc > 0) then
+      call jnc_cr(this%jnc, this%name, mempathjnc, this%injnc, this%iout, &
                   this%cxs)
     end if
     if (this%insto > 0) then

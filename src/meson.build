@@ -217,6 +217,7 @@ modflow_sources = files(
     'Model' / 'SurfaceWaterFlow' / 'swf-cxs.f90',
     'Model' / 'SurfaceWaterFlow' / 'swf-dfw.f90',
     'Model' / 'SurfaceWaterFlow' / 'swf-ic.f90',
+    'Model' / 'SurfaceWaterFlow' / 'swf-jnc.f90',
     'Model' / 'SurfaceWaterFlow' / 'swf-obs.f90',
     'Model' / 'SurfaceWaterFlow' / 'swf-oc.f90',
     'Model' / 'SurfaceWaterFlow' / 'swf-flw.f90',

@@ -357,6 +357,7 @@
 		<File RelativePath="..\src\Model\SurfaceWaterFlow\swf-cdb.f90"/>
 		<File RelativePath="..\src\Model\SurfaceWaterFlow\swf-cxs.f90"/>
 		<File RelativePath="..\src\Model\SurfaceWaterFlow\swf-dfw.f90"/>
+		<File RelativePath="..\src\Model\SurfaceWaterFlow\swf-jnc.f90"/>
 		<File RelativePath="..\src\Model\SurfaceWaterFlow\swf-evp.f90"/>
 		<File RelativePath="..\src\Model\SurfaceWaterFlow\swf-flw.f90"/>
 		<File RelativePath="..\src\Model\SurfaceWaterFlow\swf-ic.f90"/>
