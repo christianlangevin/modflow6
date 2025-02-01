@@ -35,6 +35,8 @@ module SwfJncModule
     integer(I4B), dimension(:), pointer, contiguous :: ivert_junc => null() !< the junction number that corresponds to the vertex, size (nvert); 0 if vertex does not correspond to a junction
     integer(I4B), dimension(:), pointer, contiguous :: iajunction_cell => null() !< the vertex number corresponding to each junction, size (njunction)
     integer(I4B), dimension(:), pointer, contiguous :: jajunction_cell => null() !< the junction number that corresponds to the vertex, size (nvert); 0 if vertex does not correspond to a junction
+    integer(I4B), dimension(:), pointer, contiguous :: jstart => null() !< the starting junction number for each cell, size (ncells)
+    integer(I4B), dimension(:), pointer, contiguous :: jend => null() !< the ending junction number for each cell, size (ncells)
 
     ! user-provided input
     ! integer(I4B), pointer :: is2d => null() !< flag to indicate this model is 2D overland flow and not 1d channel flow
@@ -199,6 +201,10 @@ contains
                               this%ivert_junc, this%iajunction_cell, &
                               this%jajunction_cell, this%memoryPath)
 
+      ! fill arrays to map between vertex number and junction number
+      call fill_jstart_jend(dis%nvert, dis%iavert, dis%javert, &
+                           this%ivert_junc, this%jstart, this%jend)
+
     end select
     print *, this%njunction
     print *, this%nvert
@@ -209,6 +215,8 @@ contains
     ! for some reason this is not right!
     print *, "ia", this%iajunction_cell
     print *, "ja", this%jajunction_cell
+    print *, "jstart", this%jstart
+    print *, "jend", this%jend
 
     ! ! Set the distype (either DISV1D or DIS2D)
     ! if (this%dis%is_2d()) then
@@ -284,12 +292,22 @@ contains
                       this%memoryPath)
     call mem_allocate(this%ivert_junc, this%nvert, 'IVERT_JUNC', &
                       this%memoryPath)
+    call mem_allocate(this%jstart, this%dis%nodesuser, 'JSTART', &
+                      this%memoryPath)
+    call mem_allocate(this%jend, this%dis%nodesuser, 'JEND', &
+                      this%memoryPath)
 
     do n = 1, size(this%junc_ivert)
       this%junc_ivert(n) = 0
     end do
     do n = 1, size(this%ivert_junc)
       this%ivert_junc(n) = 0
+    end do
+    do n = 1, size(this%jstart)
+      this%jstart(n) = 0
+    end do
+    do n = 1, size(this%jend)
+      this%jend(n) = 0
     end do
 
   end subroutine allocate_arrays
@@ -1260,6 +1278,8 @@ contains
     call mem_deallocate(this%ivert_junc)
     call mem_deallocate(this%iajunction_cell)
     call mem_deallocate(this%jajunction_cell)
+    call mem_deallocate(this%jstart)
+    call mem_deallocate(this%jend)
   !   call mem_deallocate(this%manningsn)
   !   call mem_deallocate(this%idcxs)
   !   call mem_deallocate(this%icelltype)
@@ -1912,5 +1932,33 @@ contains
     call spm%destroy()
 
   end subroutine fill_junction_cell
+
+  subroutine fill_jstart_jend(nvert, iavert, javert, ivert_junc, jstart, jend)
+    ! dummy
+    integer(I4B), intent(in) :: nvert
+    integer(I4B), dimension(:), intent(in) :: iavert
+    integer(I4B), dimension(:), intent(in) :: javert
+    integer(I4B), dimension(:), intent(in) :: ivert_junc
+    integer(I4B), dimension(:), intent(inout) :: jstart
+    integer(I4B), dimension(:), intent(inout) :: jend
+    ! local
+    integer(I4B) :: ic
+    integer(I4B) :: iv
+    integer(I4B) :: ijunction
+
+    ! Save the starting and ending junction number for each cell
+    do ic = 1, size(iavert) - 1
+      ! starting cell vertex
+      iv = javert(iavert(ic))
+      ijunction = ivert_junc(iv)
+      jstart(ic) = ijunction
+ 
+      ! ending cell vertex
+      iv = javert(iavert(ic + 1) - 1)
+      ijunction = ivert_junc(iv)
+      jend(ic) = ijunction
+    end do
+
+  end subroutine fill_jstart_jend
 
 end module SwfJncModule
