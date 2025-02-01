@@ -179,7 +179,7 @@ contains
     ! update number of equations
     select type (dis)
     class is (Disv1dType)
-      this%njunction = count_junctions(dis%iavert, dis%javert)
+      this%njunction = count_junctions(dis%nvert, dis%iavert, dis%javert)
       this%nvert = dis%nvert
     end select
 
@@ -191,7 +191,7 @@ contains
     class is (Disv1dType)
 
       ! fill arrays to map between vertex number and junction number
-      call fill_junc_ivert(dis%iavert, dis%javert, this%junc_ivert, &
+      call fill_junc_ivert(dis%nvert, dis%iavert, dis%javert, this%junc_ivert, &
                            this%ivert_junc)
 
       ! fill csr arrays relating junction to cells
@@ -1789,8 +1789,9 @@ contains
   !!
   !! Count the number of unique vertices that are starting or ending
   !! vertices for a cell.
-  function count_junctions(iavert, javert) result(njunction)
+  function count_junctions(nvert, iavert, javert) result(njunction)
     ! dummy
+    integer(I4B), intent(in) :: nvert
     integer(I4B), dimension(:), intent(in) :: iavert
     integer(I4B), dimension(:), intent(in) :: javert
     ! local
@@ -1800,8 +1801,13 @@ contains
     ! return
     integer(I4B) :: njunction
 
+    ! allocate memory for counting
+    allocate(icount(nvert))
+    do iv = 1, nvert
+      icount(iv) = 0
+    end do
+
     ! count the number of unique junctions
-    allocate(icount(size(iavert) - 1))
     njunction = 0
     do ic = 1, size(iavert) - 1
       ! starting cell vertex
@@ -1818,8 +1824,9 @@ contains
     
   end function count_junctions
 
-  subroutine fill_junc_ivert(iavert, javert, junc_ivert, ivert_junc)
+  subroutine fill_junc_ivert(nvert, iavert, javert, junc_ivert, ivert_junc)
     ! dummy
+    integer(I4B), intent(in) :: nvert
     integer(I4B), dimension(:), intent(in) :: iavert
     integer(I4B), dimension(:), intent(in) :: javert
     integer(I4B), dimension(:), intent(inout) :: junc_ivert
@@ -1830,8 +1837,13 @@ contains
     integer(I4B) :: iv
     integer(I4B) :: ijunction
 
+    ! allocate memory for counting
+    allocate(icount(nvert))
+    do iv = 1, nvert
+      icount(iv) = 0
+    end do
+
     ! Save the vertex number for each junction in junc_ivert
-    allocate(icount(size(iavert) - 1))
     ijunction = 1
     do ic = 1, size(iavert) - 1
       ! starting cell vertex
@@ -1893,7 +1905,8 @@ contains
     end do
 
     ! allocate memory and fill csr vectors
-    call mem_allocate(iajunction_cell, nodesuser + 1, 'IAJUNCTION_CELL', mempath)
+    call mem_allocate(iajunction_cell, njunction + 1, 'IAJUNCTION_CELL', &
+                      mempath)
     call mem_allocate(jajunction_cell, spm%nnz, 'JAJUNCTION_CELL', mempath)
     call spm%filliaja(iajunction_cell, jajunction_cell, ierr)
     call spm%destroy()
