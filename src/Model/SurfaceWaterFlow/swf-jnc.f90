@@ -29,6 +29,7 @@ module SwfJncModule
 
   type, extends(NumericalPackageType) :: SwfJncType
 
+    integer(I4B), pointer :: moffset => null() !< equation offset
     integer(I4B), pointer :: njunction => null() !< number of junctions
     integer(I4B), pointer :: nvert => null() !< number of vertices
     integer(I4B), dimension(:), pointer, contiguous :: junc_ivert => null() !< the vertex number corresponding to each junction, size (njunction)
@@ -250,6 +251,7 @@ contains
     call this%NumericalPackageType%allocate_scalars()
 
     ! Allocate scalars
+    call mem_allocate(this%moffset, 'MOFFSET', this%memoryPath)
     call mem_allocate(this%njunction, 'NJUNCTION', this%memoryPath)
     call mem_allocate(this%nvert, 'NVERT', this%memoryPath)
   !   call mem_allocate(this%is2d, 'IS2D', this%memoryPath)
@@ -264,6 +266,7 @@ contains
   !   call mem_allocate(this%nedges, 'NEDGES', this%memoryPath)
   !   call mem_allocate(this%lastedge, 'LASTEDGE', this%memoryPath)
 
+    this%moffset = 0
     this%njunction = 0
     this%nvert = 0
   !   this%is2d = 0
@@ -1294,6 +1297,7 @@ contains
   !   end if
 
     ! Scalars
+    call mem_deallocate(this%moffset)
     call mem_deallocate(this%njunction)
     call mem_deallocate(this%nvert)
   !   call mem_deallocate(this%is2d)

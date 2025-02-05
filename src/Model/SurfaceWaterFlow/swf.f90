@@ -133,7 +133,7 @@ contains
     ! initialize
     this%inic = 0
     this%indfw = 0
-    this%injnc = 1  ! todo hardwired!
+    this%injnc = 0
     this%incxs = 0
     this%insto = 0
     this%inobs = 0
@@ -194,7 +194,6 @@ contains
     call this%allocate_arrays()
 
     ! Allow the junction package to increase neq
-    this%injnc = 1
     if (this%injnc > 0) then
       call this%jnc%jnc_df(this%neq, this%dis)
     end if
@@ -223,7 +222,24 @@ contains
     integer(I4B) :: ip
 
     ! Add the primary grid connections of this model to sparse
-    call this%dis%dis_ac(this%moffset, sparse)
+    if (this%injnc == 0) then
+      call this%dis%dis_ac(this%moffset, sparse)
+    end if
+
+    if (this%injnc == 1) then
+
+      ! integer(I4B) :: i, j, ipos, iglo, jglo
+      !
+      ! do i = 1, this%nodes
+      !   iglo = i + moffset
+      !   do ipos = this%con%ia(i), this%con%ia(i + 1) - 1
+      !     j = this%con%ja(ipos)
+      !     jglo = j + moffset
+      !     idxglo(ipos) = matrix_sln%get_position(iglo, jglo)
+      !   end do
+      ! end do
+  
+    end if
 
     ! Add any additional connections
     !    none

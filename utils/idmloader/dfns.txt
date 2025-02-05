@@ -67,6 +67,7 @@ chf-ic.dfn
 chf-cdb.dfn
 chf-chd.dfn
 chf-flw.dfn
+chf-jnc.dfn
 chf-pcp.dfn
 chf-evp.dfn
 chf-sto.dfn

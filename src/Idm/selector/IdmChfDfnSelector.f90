@@ -13,6 +13,7 @@ module IdmChfDfnSelectorModule
   use ChfCdbInputModule
   use ChfChdInputModule
   use ChfFlwInputModule
+  use ChfJncInputModule
   use ChfPcpInputModule
   use ChfEvpInputModule
   use ChfStoInputModule
@@ -68,6 +69,8 @@ contains
       call set_param_pointer(input_definition, chf_chd_param_definitions)
     case ('FLW')
       call set_param_pointer(input_definition, chf_flw_param_definitions)
+    case ('JNC')
+      call set_param_pointer(input_definition, chf_jnc_param_definitions)
     case ('PCP')
       call set_param_pointer(input_definition, chf_pcp_param_definitions)
     case ('EVP')
@@ -102,6 +105,8 @@ contains
       call set_param_pointer(input_definition, chf_chd_aggregate_definitions)
     case ('FLW')
       call set_param_pointer(input_definition, chf_flw_aggregate_definitions)
+    case ('JNC')
+      call set_param_pointer(input_definition, chf_jnc_aggregate_definitions)
     case ('PCP')
       call set_param_pointer(input_definition, chf_pcp_aggregate_definitions)
     case ('EVP')
@@ -136,6 +141,8 @@ contains
       call set_block_pointer(input_definition, chf_chd_block_definitions)
     case ('FLW')
       call set_block_pointer(input_definition, chf_flw_block_definitions)
+    case ('JNC')
+      call set_block_pointer(input_definition, chf_jnc_block_definitions)
     case ('PCP')
       call set_block_pointer(input_definition, chf_pcp_block_definitions)
     case ('EVP')
@@ -169,6 +176,8 @@ contains
       multi_package = chf_chd_multi_package
     case ('FLW')
       multi_package = chf_flw_multi_package
+    case ('JNC')
+      multi_package = chf_jnc_multi_package
     case ('PCP')
       multi_package = chf_pcp_multi_package
     case ('EVP')
@@ -205,6 +214,8 @@ contains
       call set_subpkg_pointer(subpackages, chf_chd_subpackages)
     case ('FLW')
       call set_subpkg_pointer(subpackages, chf_flw_subpackages)
+    case ('JNC')
+      call set_subpkg_pointer(subpackages, chf_jnc_subpackages)
     case ('PCP')
       call set_subpkg_pointer(subpackages, chf_pcp_subpackages)
     case ('EVP')
@@ -238,6 +249,8 @@ contains
     case ('CHD')
       integrated = .true.
     case ('FLW')
+      integrated = .true.
+    case ('JNC')
       integrated = .true.
     case ('PCP')
       integrated = .true.
