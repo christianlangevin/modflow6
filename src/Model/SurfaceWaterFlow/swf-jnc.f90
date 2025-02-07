@@ -34,8 +34,8 @@ module SwfJncModule
     integer(I4B), pointer :: nvert => null() !< number of vertices
     integer(I4B), dimension(:), pointer, contiguous :: junc_ivert => null() !< the vertex number corresponding to each junction, size (njunction)
     integer(I4B), dimension(:), pointer, contiguous :: ivert_junc => null() !< the junction number that corresponds to the vertex, size (nvert); 0 if vertex does not correspond to a junction
-    integer(I4B), dimension(:), pointer, contiguous :: iajunction_cell => null() !< the vertex number corresponding to each junction, size (njunction)
-    integer(I4B), dimension(:), pointer, contiguous :: jajunction_cell => null() !< the junction number that corresponds to the vertex, size (nvert); 0 if vertex does not correspond to a junction
+    integer(I4B), dimension(:), pointer, contiguous :: iajunction_cell => null() !< the index array for jajunction_cell, size (njunction + 1)
+    integer(I4B), dimension(:), pointer, contiguous :: jajunction_cell => null() !< csr array to map junction number to cells ()
     integer(I4B), dimension(:), pointer, contiguous :: jstart => null() !< the starting junction number for each cell, size (ncells)
     integer(I4B), dimension(:), pointer, contiguous :: jend => null() !< the ending junction number for each cell, size (ncells)
 
@@ -77,6 +77,7 @@ module SwfJncModule
     procedure :: jnc_df
     procedure :: allocate_scalars
     procedure :: allocate_arrays
+    procedure :: jnc_ac
     ! procedure :: dfw_load
     ! procedure :: source_options
     ! procedure :: log_options
@@ -109,6 +110,10 @@ module SwfJncModule
     ! procedure, public :: set_edge_properties
     ! procedure :: calc_dhds
     ! procedure :: write_cxs_tables
+    procedure, private :: jglo_qup
+    procedure, private :: jglo_qdn
+    procedure, private :: jglo_hjup
+    procedure, private :: jglo_hjdn
 
   end type SwfJncType
 
@@ -175,6 +180,14 @@ contains
     class(SwfJncType) :: this !< this instance
     integer(I4B), intent(inout) :: neq !< number of equations
     class(DisBaseType), pointer :: dis !< the pointer to the discretization
+    ! local
+    character(len=*), parameter :: fmtneq = &
+      &"(1x, 'The SWF Model is configured for dynamic wave equations',&
+      &/3x, 'Number of cell continuity equations: ', I0, &
+      &/3x, 'Number of motion equations: ', I0, &
+      &/3x, 'Number of junction continuity equations: ', I0, &
+      &/3x, 'Total number of equations: ', I0&
+      &)"
 
     ! Set a pointers to passed in objects
     this%dis => dis
@@ -219,6 +232,20 @@ contains
     print *, "jstart", this%jstart
     print *, "jend", this%jend
 
+
+    ! Number of equations include:
+    !   reach continuity: dis%nodes
+    !   motion equations (flow at reach ends): 2 * dis%nodes
+    !   junction continuity: njunctions
+    ! Number of unknowns include:
+    !   reach stage (nreach)
+    !   junction stages (njunctions)
+    !   flows at reach ends (nreach * 2)
+    neq = dis%nodes
+    neq = neq + this%njunction
+    neq = neq + dis%nodes * 2
+    write (this%iout, fmtneq) dis%nodes, dis%nodes * 2, this%njunction, neq
+
     ! ! Set the distype (either DISV1D or DIS2D)
     ! if (this%dis%is_2d()) then
     !   this%is2d = 1
@@ -235,6 +262,178 @@ contains
     !end if
 
   end subroutine jnc_df
+
+  !> @brief Add connections to sparse cell connectivity matrix
+  !!
+  !!                                                    Columns
+  !!              h1  h2  h3  ...  hn  Qup1  Qdn1  Qup2  Qdn2  ...  Qupn  Qdnn  hj1  hj2  hj3  ...  hjn 
+  !! rows
+  !!
+  !! Cont cell 1
+  !!      cell 2
+  !!      ...
+  !!      cell n
+  !!
+  !! Flow Qup_c1
+  !!      Qdn_c1
+  !!      Qup_c2
+  !!      Qdn_c2
+  !!      ...
+  !!      Qup_cn
+  !!      Qdn_cn
+  !!
+  !! Junc Qjnc1
+  !!      Qjnc2
+  !!      ...
+  !!      Qjncn
+  !<
+  subroutine jnc_ac(this, moffset, sparse)
+    ! modules
+    use SparseModule, only: sparsematrix
+    ! dummy
+    class(SwfJncType) :: this
+    integer(I4B), intent(in) :: moffset
+    type(sparsematrix), intent(inout) :: sparse
+    ! local
+    integer(I4B) :: i, j, iglo, jglo
+
+    ! Rows are as follows
+    !   nodes: cell continuity (node1, node2, node3, ...)
+    !   2 * nodes: motion equations (Qup1, Qdn1, Qup2, Qdn2, ...)
+    !   njunctions: junction continuity (j1, j2, ...)
+
+    ! Columns are as follows:
+    !   nodes: cell heads (h1, h2, h3, ...)
+    !   Q: flows at cell edges (Qup1, Qdn1, Qup2, Qdn2, ...)
+    !   njunctions: junction heads (hj1, hj2, hj3, ...)
+
+    ! cell continuity equation -- each row has a diagonal component (hn)
+    ! and Qup and Qdn components
+    do i = 1, this%dis%nodes
+
+      ! diagonal component
+      iglo = i + moffset
+      jglo = iglo
+      call sparse%addconnection(iglo, jglo, 1)
+
+      ! Qup
+      jglo = this%jglo_qup(i, moffset)
+      call sparse%addconnection(iglo, jglo, 1)
+
+      ! Qdn
+      jglo = this%jglo_qdn(i, moffset)
+      call sparse%addconnection(iglo, jglo, 1)
+
+    end do
+
+    ! motion equations -- each row has a coefficient entry for the Q itself,
+    ! the cell head, the junction head, and the Q on the other side of the reach
+    do i = 1, this%dis%nodes
+
+      ! First process the up side flow for cell i
+
+      ! diagonal
+      iglo = this%jglo_qup(i, moffset)
+      call sparse%addconnection(iglo, iglo, 1)
+
+      ! cell head
+      jglo = i + moffset
+      call sparse%addconnection(iglo, jglo, 1)
+
+      ! junction head on up side
+      jglo = this%jglo_hjup(i, moffset)
+      call sparse%addconnection(iglo, jglo, 1)
+
+      ! flow on other side (dn)
+      jglo = this%jglo_qdn(i, moffset)
+      call sparse%addconnection(iglo, jglo, 1)
+
+
+      ! Second, process the down side flow for cell i
+
+      ! diagonal
+      iglo = this%jglo_qdn(i, moffset)
+      call sparse%addconnection(iglo, jglo, 1)
+
+      ! cell head
+      jglo = i + moffset
+      call sparse%addconnection(iglo, jglo, 1)
+
+      ! junction head on dn side
+      jglo = this%jglo_hjdn(i, moffset)
+      call sparse%addconnection(iglo, jglo, 1)
+
+      ! flow on other side (up)
+      jglo = this%jglo_qup(i, moffset)
+      call sparse%addconnection(iglo, jglo, 1)
+
+    end do
+
+    do j = 1, this%dis%nodes
+
+      ! up side junction for this cell
+      i = this%jstart(j)
+
+      ! global row number for this junction
+      iglo = moffset + 3 * this%dis%nodes + i
+
+      ! up side Q
+      jglo = this%jglo_qup(j, moffset)
+      call sparse%addconnection(iglo, jglo, 1)
+
+      ! dn side junction for this cell
+      i = this%jend(j)
+
+      ! global row number for this junction
+      iglo = moffset + 3 * this%dis%nodes + i
+
+      ! dn side Q
+      jglo = this%jglo_qdn(j, moffset)
+      call sparse%addconnection(iglo, jglo, 1)
+
+    end do
+
+  end subroutine jnc_ac
+
+  !> @ brief Return position in x array for flow on up side
+  function jglo_qup(this, node, moffset) result(jglo)
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: node !< node number in model indices
+    integer(I4B), intent(in) :: moffset !< model offset (0 for none)
+    integer(I4B) :: jglo
+    jglo = this%jglo_qdn(node, moffset) - 1
+  end function jglo_qup
+
+  !> @ brief Return position in x array for flow on down side
+  function jglo_qdn(this, node, moffset) result(jglo)
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: node !< node number in model indices
+    integer(I4B), intent(in) :: moffset !< model offset (0 for none)
+    integer(I4B) :: jglo
+    jglo = moffset + this%dis%nodes + node * 2
+  end function jglo_qdn
+
+  !> @ brief Return position in x array for junction head on up side of cell
+  function jglo_hjup(this, node, moffset) result(jglo)
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: node !< node number in model indices
+    integer(I4B), intent(in) :: moffset !< model offset (0 for none)
+    integer(I4B) :: jglo
+    jglo = moffset + this%dis%nodes + 2 * this%dis%nodes + this%jstart(node)
+  end function jglo_hjup
+
+  !> @ brief Return position in x array for junction head on down side of cell
+  function jglo_hjdn(this, node, moffset) result(jglo)
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: node !< node number in model indices
+    integer(I4B), intent(in) :: moffset !< model offset (0 for none)
+    integer(I4B) :: jglo
+    jglo = moffset + this%dis%nodes + 2 * this%dis%nodes + this%jend(node)
+  end function jglo_hjdn
 
   !> @ brief Allocate scalars
   !!

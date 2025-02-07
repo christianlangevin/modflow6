@@ -101,6 +101,7 @@ modflow_sources = files(
     'Idm' / 'chf-cxsidm.f90',
     'Idm' / 'chf-dfwidm.f90',
     'Idm' / 'chf-icidm.f90',
+    'Idm' / 'chf-jncidm.f90',
     'Idm' / 'chf-flwidm.f90',
     'Idm' / 'chf-chdidm.f90',
     'Idm' / 'chf-cdbidm.f90',

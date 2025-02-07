@@ -227,18 +227,7 @@ contains
     end if
 
     if (this%injnc == 1) then
-
-      ! integer(I4B) :: i, j, ipos, iglo, jglo
-      !
-      ! do i = 1, this%nodes
-      !   iglo = i + moffset
-      !   do ipos = this%con%ia(i), this%con%ia(i + 1) - 1
-      !     j = this%con%ja(ipos)
-      !     jglo = j + moffset
-      !     idxglo(ipos) = matrix_sln%get_position(iglo, jglo)
-      !   end do
-      ! end do
-  
+      call this%jnc%jnc_ac(this%moffset, sparse)
     end if
 
     ! Add any additional connections
