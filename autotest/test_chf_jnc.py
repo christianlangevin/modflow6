@@ -43,6 +43,7 @@ def build_models(idx, test):
     tdis = flopy.mf6.ModflowTdis(sim)
     ims = flopy.mf6.ModflowIms(
         sim,
+        no_ptcrecord="ALL",
         print_option="all",
         linear_acceleration="BICGSTAB",
         outer_dvclose=1.0e-7,
@@ -72,31 +73,31 @@ def build_models(idx, test):
         cell1d=cell1d,
     )
 
-    dfw = flopy.mf6.ModflowChfdfw(
-        chf,
-        print_flows=True,
-        save_flows=True,
-        manningsn=0.035,
-        idcxs=0,
-    )
+    # dfw = flopy.mf6.ModflowChfdfw(
+    #     chf,
+    #     print_flows=True,
+    #     save_flows=True,
+    #     manningsn=0.035,
+    #     idcxs=0,
+    # )
 
     jnc = flopy.mf6.ModflowChfjnc(chf)
 
-    sto = flopy.mf6.ModflowChfsto(chf, save_flows=True)
+    # sto = flopy.mf6.ModflowChfsto(chf, save_flows=True)
 
     ic = flopy.mf6.ModflowChfic(chf, strt=1.0)
 
-    xfraction = [0.0, 0.0, 1.0, 1.0]
-    height = [100.0, 0.0, 0.0, 100.0]
-    mannfraction = [1.0, 1.0, 1.0, 1.0]
-    cxsdata = list(zip(xfraction, height, mannfraction))
-    cxs = flopy.mf6.ModflowChfcxs(
-        chf,
-        nsections=1,
-        npoints=4,
-        packagedata=[(0, 4)],
-        crosssectiondata=cxsdata,
-    )
+    # xfraction = [0.0, 0.0, 1.0, 1.0]
+    # height = [100.0, 0.0, 0.0, 100.0]
+    # mannfraction = [1.0, 1.0, 1.0, 1.0]
+    # cxsdata = list(zip(xfraction, height, mannfraction))
+    # cxs = flopy.mf6.ModflowChfcxs(
+    #     chf,
+    #     nsections=1,
+    #     npoints=4,
+    #     packagedata=[(0, 4)],
+    #     crosssectiondata=cxsdata,
+    # )
 
     # output control
     oc = flopy.mf6.ModflowChfoc(
@@ -125,21 +126,21 @@ def build_models(idx, test):
         }
     else:
         flw_spd = {0: flw_list}
-    flw = flopy.mf6.ModflowChfflw(
-        chf,
-        maxbound=maxbound,
-        print_input=True,
-        print_flows=True,
-        stress_period_data=flw_spd,
-    )
+    # flw = flopy.mf6.ModflowChfflw(
+    #     chf,
+    #     maxbound=maxbound,
+    #     print_input=True,
+    #     print_flows=True,
+    #     stress_period_data=flw_spd,
+    # )
 
-    chd = flopy.mf6.ModflowChfchd(
-        chf,
-        maxbound=1,
-        print_input=True,
-        print_flows=True,
-        stress_period_data=[(2, 1.0)],
-    )
+    # chd = flopy.mf6.ModflowChfchd(
+    #     chf,
+    #     maxbound=1,
+    #     print_input=True,
+    #     print_flows=True,
+    #     stress_period_data=[(2, 1.0)],
+    # )
 
     return sim, None
 

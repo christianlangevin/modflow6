@@ -78,6 +78,7 @@ module SwfJncModule
     procedure :: allocate_scalars
     procedure :: allocate_arrays
     procedure :: jnc_ac
+    procedure :: jnc_mc
     ! procedure :: dfw_load
     ! procedure :: source_options
     ! procedure :: log_options
@@ -86,7 +87,7 @@ module SwfJncModule
     ! procedure :: dfw_ar
     ! procedure :: dfw_rp
     ! procedure :: dfw_ad
-    ! procedure :: dfw_fc
+    procedure :: jnc_fc
     ! procedure :: dfw_qnm_fc_nr
     ! !procedure :: dfw_qnm_fc
     ! procedure :: dfw_fn
@@ -311,18 +312,26 @@ contains
     ! and Qup and Qdn components
     do i = 1, this%dis%nodes
 
-      ! diagonal component
+      ! diagonal component, head in cell
       iglo = i + moffset
       jglo = iglo
       call sparse%addconnection(iglo, jglo, 1)
 
-      ! Qup
-      jglo = this%jglo_qup(i, moffset)
+      ! head in junction on up side
+      jglo = this%jglo_hjup(i, moffset)
       call sparse%addconnection(iglo, jglo, 1)
 
-      ! Qdn
-      jglo = this%jglo_qdn(i, moffset)
+      ! head in junction on dn side
+      jglo = this%jglo_hjdn(i, moffset)
       call sparse%addconnection(iglo, jglo, 1)
+
+      ! ! Qup
+      ! jglo = this%jglo_qup(i, moffset)
+      ! call sparse%addconnection(iglo, jglo, 1)
+
+      ! ! Qdn
+      ! jglo = this%jglo_qdn(i, moffset)
+      ! call sparse%addconnection(iglo, jglo, 1)
 
     end do
 
@@ -334,7 +343,8 @@ contains
 
       ! diagonal
       iglo = this%jglo_qup(i, moffset)
-      call sparse%addconnection(iglo, iglo, 1)
+      jglo = iglo
+      call sparse%addconnection(iglo, jglo, 1)
 
       ! cell head
       jglo = i + moffset
@@ -353,6 +363,7 @@ contains
 
       ! diagonal
       iglo = this%jglo_qdn(i, moffset)
+      jglo = iglo
       call sparse%addconnection(iglo, jglo, 1)
 
       ! cell head
@@ -369,6 +380,16 @@ contains
 
     end do
 
+    ! add diagonal for each junction
+    do i = 1, this%njunction
+
+      ! global row number for this junction
+      iglo = moffset + 3 * this%dis%nodes + i
+      jglo = iglo
+      call sparse%addconnection(iglo, jglo, 1)
+
+    end do
+
     do j = 1, this%dis%nodes
 
       ! up side junction for this cell
@@ -377,9 +398,13 @@ contains
       ! global row number for this junction
       iglo = moffset + 3 * this%dis%nodes + i
 
-      ! up side Q
-      jglo = this%jglo_qup(j, moffset)
+      ! global column number for cell head
+      jglo = moffset + j
       call sparse%addconnection(iglo, jglo, 1)
+
+      ! ! up side Q
+      ! jglo = this%jglo_qup(j, moffset)
+      ! call sparse%addconnection(iglo, jglo, 1)
 
       ! dn side junction for this cell
       i = this%jend(j)
@@ -387,13 +412,230 @@ contains
       ! global row number for this junction
       iglo = moffset + 3 * this%dis%nodes + i
 
-      ! dn side Q
-      jglo = this%jglo_qdn(j, moffset)
+      ! global column number for cell
+      jglo = moffset + j
       call sparse%addconnection(iglo, jglo, 1)
+
+      ! ! dn side Q
+      ! jglo = this%jglo_qdn(j, moffset)
+      ! call sparse%addconnection(iglo, jglo, 1)
 
     end do
 
   end subroutine jnc_ac
+
+  !> @brief Map cell connections in the numerical solution coefficient matrix.
+  subroutine jnc_mc(this, moffset, idxglo, matrix_sln)
+    ! dummy
+    class(SwfJncType) :: this
+    integer(I4B), intent(in) :: moffset
+    integer(I4B), dimension(:), intent(inout) :: idxglo
+    class(MatrixBaseType), pointer :: matrix_sln
+    ! local
+    integer(I4B) :: i, j, ipos, iglo, jglo
+
+    ! todo: need to figure out what global matrix positions to store in
+    ! idxglo.  Idxglo is allocated to size swf%nja.  Not sure that is of any
+    ! use.
+    do i = 1, this%dis%nodes
+      iglo = i + moffset
+      do ipos = this%dis%con%ia(i), this%dis%con%ia(i + 1) - 1
+        j = this%dis%con%ja(ipos)
+        jglo = j + moffset
+        idxglo(ipos) = matrix_sln%get_position(iglo, jglo)
+      end do
+    end do
+
+  end subroutine jnc_mc
+
+  !> @brief fill coefficients for jnc
+  subroutine jnc_fc(this, kiter, moffset, matrix_sln, idxglo, rhs, stage, &
+                    stage_old)
+    ! modules
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B) :: kiter
+    integer(I4B), intent(in) :: moffset
+    class(MatrixBaseType), pointer :: matrix_sln
+    integer(I4B), intent(in), dimension(:) :: idxglo
+    real(DP), intent(inout), dimension(:) :: rhs
+    real(DP), intent(inout), dimension(:) :: stage
+    real(DP), intent(inout), dimension(:) :: stage_old
+    ! local
+    integer(I4B) :: ipos_sln
+    integer(I4B) :: i, j, iglo, jglo
+    real(DP) :: val
+    real(DP) :: cond
+
+    ! half cell conductance for cell i (what head should this be a function of?)
+    cond = 1.d0 ! this is half-cell conductance for cell i
+
+    ! add coefficients for cell continuity equations
+    ! cell continuity equation -- each row has a diagonal component (hn)
+    ! and Qup and Qdn components
+    do i = 1, this%dis%nodes
+
+      ! diagonal component
+      iglo = i + moffset
+      jglo = iglo
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = -cond ! sum of conductance terms; TODO: and then there will be a storage term
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! head in junction on up side
+      jglo = this%jglo_hjup(i, moffset)
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = cond ! conductance term and then there will be a storage term
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! diagonal component
+      iglo = i + moffset
+      jglo = iglo
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = -cond ! sum of conductance terms; TODO: and then there will be a storage term
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! head in junction on dn side
+      jglo = this%jglo_hjdn(i, moffset)
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = cond ! conductance term and then there will be a storage term
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! ! Qup
+      ! jglo = this%jglo_qup(i, moffset)
+      ! ipos_sln = matrix_sln%get_position(iglo, jglo)
+      ! val = 1.d0  ! this should be reach length / 2
+      ! call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! ! Qdn
+      ! jglo = this%jglo_qdn(i, moffset)
+      ! ipos_sln = matrix_sln%get_position(iglo, jglo)
+      ! val = 1.d0  ! this should be reach length / 2
+      ! call matrix_sln%add_value_pos(ipos_sln, val)
+
+    end do
+
+    ! motion equations -- each row has a coefficient entry for the Q itself,
+    ! the cell head, the junction head, and the Q on the other side of the reach
+    do i = 1, this%dis%nodes
+
+      ! First process the up side flow for cell i
+
+      ! diagonal
+      iglo = this%jglo_qup(i, moffset)
+      jglo = iglo
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = -1.d0 ! will also need to add temporal intertial term
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! coefficient for cell head
+      jglo = i + moffset
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = -cond
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! junction head on up side
+      jglo = this%jglo_hjup(i, moffset)
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = cond
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! flow on other side (dn)
+      jglo = this%jglo_qdn(i, moffset)
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = DZERO ! this will be a spatial inertial term
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! Second, process the down side flow for cell i
+
+      ! diagonal
+      iglo = this%jglo_qdn(i, moffset)
+      jglo = iglo
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = -1.d0 ! will also need to add temporal intertial term
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! cell head
+      jglo = i + moffset
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = -cond
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! junction head on dn side
+      jglo = this%jglo_hjdn(i, moffset)
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = cond
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! flow on other side (up)
+      jglo = this%jglo_qup(i, moffset)
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = DZERO ! this will be a spatial inertial term
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+    end do
+
+    ! ! add diagonal for each junction
+    ! do i = 1, this%njunction
+
+    !   ! global row number for this junction
+    !   iglo = moffset + 3 * this%dis%nodes + i
+    !   jglo = iglo
+    !   ipos_sln = matrix_sln%get_position(iglo, jglo)
+    !   val = DZERO ! no diagonal term for junctions
+    !   call matrix_sln%add_value_pos(ipos_sln, val)
+
+    ! end do
+
+    do j = 1, this%dis%nodes
+
+      ! up side junction for this cell
+      i = this%jstart(j)
+
+      ! diagonal position
+      iglo = moffset + 3 * this%dis%nodes + i
+      jglo = iglo
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = -cond ! coefficient for hj
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! global column number for cell head
+      jglo = moffset + j
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = cond ! coefficient for hi
+      call matrix_sln%add_value_pos(ipos_sln, val)
+      
+      ! ! up side Q
+      ! jglo = this%jglo_qup(j, moffset)
+      ! ipos_sln = matrix_sln%get_position(iglo, jglo)
+      ! val = -1.d0 ! 100 percent of flow is for junction; negative to indicate flow into junction
+      ! call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! dn side junction for this cell
+      i = this%jend(j)
+
+      ! diagonal position
+      iglo = moffset + 3 * this%dis%nodes + i
+      jglo = iglo
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = -cond ! coefficient for hj
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! global column number for cell head
+      jglo = moffset + j
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = cond ! coefficient for hi
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! ! dn side Q
+      ! jglo = this%jglo_qdn(j, moffset)
+      ! ipos_sln = matrix_sln%get_position(iglo, jglo)
+      ! val = -1.d0 ! 100 percent of flow is for junction; negative to indicate flow into junction
+      ! call matrix_sln%add_value_pos(ipos_sln, val)
+
+    end do
+
+  end subroutine jnc_fc
 
   !> @ brief Return position in x array for flow on up side
   function jglo_qup(this, node, moffset) result(jglo)

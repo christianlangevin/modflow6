@@ -154,7 +154,7 @@ contains
     ! allocate members from parent class
     call this%NumericalModelType%allocate_arrays()
 
-    if (this%indfw == 0) then
+    if (this%indfw == 0 .and. this%injnc == 0) then
       ! explicit model, so these must be manually allocated (not used)
       call mem_allocate(this%x, this%dis%nodes, 'X', this%memoryPath)
       call mem_allocate(this%rhs, this%dis%nodes, 'RHS', this%memoryPath)
@@ -180,7 +180,9 @@ contains
 
     ! call package df routines
     call this%dis%dis_df()
-    call this%dfw%dfw_df(this%dis)
+    if (this%indfw > 0) then
+      call this%dfw%dfw_df(this%dis)
+    end if
     call this%oc%oc_df()
     call this%budget%budget_df(NIUNIT_SWF, 'VOLUME', 'L**3')
 
@@ -253,7 +255,13 @@ contains
 
     ! Find the position of each connection in the global ia, ja structure
     ! and store them in idxglo.
-    call this%dis%dis_mc(this%moffset, this%idxglo, matrix_sln)
+    if (this%injnc == 0) then
+      call this%dis%dis_mc(this%moffset, this%idxglo, matrix_sln)
+    end if
+
+    if (this%injnc == 1) then
+      call this%jnc%jnc_mc(this%moffset, this%idxglo, matrix_sln)
+    end if
 
     ! Map any additional connections
     ! none
@@ -291,7 +299,7 @@ contains
     deallocate (itemp)
 
     ! set up output control
-    if (this%indfw > 0) then
+    if (this%indfw > 0 .or. this%injnc > 0) then
       call this%oc%oc_ar('STAGE', this%x, this%dis, DNODATA)
     end if
     call this%budget%set_ibudcsv(this%oc%ibudcsv)
@@ -427,14 +435,41 @@ contains
     !   if (inwtflag == 1) inwtcsub = this%csub%inewton
     ! end if
 
-    ! Fill standard conductance terms
-    if (this%indfw > 0) call this%dfw%dfw_fc(kiter, matrix_sln, this%idxglo, &
-                                             this%rhs, this%x, this%xold)
+    ! constant junction head
+    this%ibound(10) = -1
+    this%x(10) = 1.5
+
+    ! constant inflow to first reach
+    ! this%ibound(4) = -1
+    ! this%x(4) = 8.3d-2
+
+    ! constant junction head at end
+    this%ibound(13) = -1
+    this%x(13) = 1.
+
+    do ip = 1, size(this%x)
+      print *, ip, this%ibound(ip), this%x(ip)
+    end do
+
+    ! Fill matrix equations
+    if (this%injnc == 0) then
+      if (this%indfw > 0) then
+        call this%dfw%dfw_fc(kiter, matrix_sln, this%idxglo, &
+                             this%rhs, this%x, this%xold)
+      end if
+    end if
+
+    if (this%injnc == 1) then
+      call this%jnc%jnc_fc(kiter, this%moffset, matrix_sln, this%idxglo, &
+                           this%rhs, this%x, this%xold)
+    end if
+
     ! storage
     if (this%insto > 0) then
       call this%sto%sto_fc(kiter, this%xold, this%x, matrix_sln, &
                            this%idxglo, this%rhs)
     end if
+
     ! if (this%inmvr > 0) call this%mvr%mvr_fc()
     do ip = 1, this%bndlist%Count()
       packobj => GetBndFromList(this%bndlist, ip)
@@ -444,6 +479,8 @@ contains
     !--Fill newton terms
     if (this%indfw > 0) then
       if (inwt /= 0) then
+        ! todo: this doesn't do anything now.  dfw is all newton, so it is done
+        ! in dfw_fc
         call this%dfw%dfw_fn(kiter, matrix_sln, this%idxglo, this%rhs, this%x)
       end if
     end if
@@ -933,7 +970,7 @@ contains
         &Wave (DFW) package is used.'
       call store_error(errmsg)
     end if
-    if (this%indfw == 0) then
+    if (this%indfw == 0 .and. this%injnc == 0) then
       write (errmsg, '(1x,a)') &
         'DFW6 Package must be specified.'
       call store_error(errmsg)
