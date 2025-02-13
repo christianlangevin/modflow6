@@ -436,16 +436,16 @@ contains
     ! end if
 
     ! constant junction head
-    this%ibound(10) = -1
-    this%x(10) = 1.5
+    this%ibound(8) = -1
+    this%x(8) = 1.5
 
     ! constant inflow to first reach
     ! this%ibound(4) = -1
     ! this%x(4) = 8.3d-2
 
     ! constant junction head at end
-    this%ibound(13) = -1
-    this%x(13) = 1.
+    this%ibound(9) = -1
+    this%x(9) = 1.
 
     do ip = 1, size(this%x)
       print *, ip, this%ibound(ip), this%x(ip)
@@ -1159,7 +1159,7 @@ contains
     end if
     if (this%injnc > 0) then
       call jnc_cr(this%jnc, this%name, mempathjnc, this%injnc, this%iout, &
-                  this%cxs)
+                  this%dfw, this%cxs)
     end if
     if (this%insto > 0) then
       call sto_cr(this%sto, this%name, mempathsto, this%insto, this%iout, &
