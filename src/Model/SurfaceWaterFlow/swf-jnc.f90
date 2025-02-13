@@ -45,6 +45,8 @@ module SwfJncModule
     integer(I4B), dimension(:), pointer, contiguous :: juncred_junc => null() !< given a reduced junction number, return the junction number, size (njunc_red)
     integer(I4B), dimension(:), pointer, contiguous :: irowqup => null() !< given a cell number, return row for the upside q (ncells)
     integer(I4B), dimension(:), pointer, contiguous :: irowqdn => null() !< given a cell number, return row for the downside q (ncells)
+    integer(I4B), dimension(:), pointer, contiguous :: icellup => null() !< given a cell number, return number of up side cell if no active junction, otherwise a zero if there is an active junction (ncells)
+    integer(I4B), dimension(:), pointer, contiguous :: icelldn => null() !< given a cell number, return number of dn side cell if no active junction, otherwise a zero if there is an active junction (ncells)
 
 
     ! user-provided input
@@ -124,6 +126,8 @@ module SwfJncModule
     procedure, private :: jglo_qdn
     procedure, private :: jglo_hup
     procedure, private :: jglo_hdn
+    procedure, private :: get_icell_up
+    procedure, private :: get_icell_dn
 
   end type SwfJncType
 
@@ -236,8 +240,13 @@ contains
       call fill_junc_juncred(this%iajunction_cell, this%jajunction_cell, &
                              this%junc_juncred, this%juncred_junc)
 
-      call fill_irow_qupdn(this%jstart, this%jend, this%junc_juncred, this%nq, &
-                           this%irowqup, this%irowqdn)
+      ! fill icellup with up side cell number or zero if active junction on up side
+      call fill_icellupdn(this%jend, this%iajunction_cell, this%jajunction_cell, &
+                          this%icellup, this%icelldn)
+
+      ! fill irowqup and irowqdn
+      call fill_irow_qupdn(this%jstart, this%jend, this%junc_juncred, &
+                           this%icellup, this%nq, this%irowqup, this%irowqdn)
 
     end select
     print *, "njunction", this%njunction
@@ -257,6 +266,8 @@ contains
     print *, "juncred_junc", this%juncred_junc
     print *, "irowqup", this%irowqup
     print *, "irowqdn", this%irowqdn
+    print *, "icellup", this%icellup
+    print *, "icelldn", this%icelldn
 
 
     ! Number of equations include:
@@ -334,7 +345,7 @@ contains
     !   njunctions: junction heads (hj1, hj2, hj3, ...)
 
     ! cell continuity equation -- each row has a diagonal component (hn)
-    ! and Qup and Qdn components
+    ! and hup and hdn components
     do i = 1, this%dis%nodes
 
       ! diagonal component, head in cell
@@ -350,21 +361,14 @@ contains
       jglo = this%jglo_hdn(i, moffset)
       call sparse%addconnection(iglo, jglo, 1)
 
-      ! ! Qup
-      ! jglo = this%jglo_qup(i, moffset)
-      ! call sparse%addconnection(iglo, jglo, 1)
-
-      ! ! Qdn
-      ! jglo = this%jglo_qdn(i, moffset)
-      ! call sparse%addconnection(iglo, jglo, 1)
-
     end do
 
     ! motion equations -- each row has a coefficient entry for the Q itself,
     ! the cell head, the junction head, and the Q on the other side of the reach
     do i = 1, this%dis%nodes
 
-      ! First, process the down side flow for cell i
+      ! First, process the down side flow for cell i; there is a dn side Q
+      ! equation for every cell.  Sign will be positive into cell i.
 
       ! diagonal
       iglo = this%jglo_qdn(i, moffset)
@@ -387,7 +391,11 @@ contains
 
     do i = 1, this%dis%nodes
 
-      ! Second process the up side flow for cell i
+      ! Second, process the up side flow for cell i.  Not every cell will have
+      ! its own unique Q equation for the up side.  If there is no active
+      ! junction on the up side, then Qup for cell i is the same (but reverse 
+      ! in sign) for Qdn of the up side cell.
+
       j = this%jstart(i)
       jred = this%junc_juncred(j)
       if (jred == 0) then
@@ -510,7 +518,7 @@ contains
     real(DP), intent(inout), dimension(:) :: stage_old
     ! local
     integer(I4B) :: ipos_sln
-    integer(I4B) :: i, j, iglo, jglo, jred
+    integer(I4B) :: i, j, iglo, jglo, jred, ired
     real(DP) :: val
     real(DP) :: cond
     real(DP) :: depth, dx, width, dhds, cln, clm
@@ -523,25 +531,25 @@ contains
     ! and Qup and Qdn components
     do i = 1, this%dis%nodes
 
-      cln = 500.d0
-      clm = 500.d0
+      ! cln = 500.d0
+      ! clm = 500.d0
 
-      ! need conductance term for cell i in the up direction
-      ! if iup is a junction, then use half-cell conductance of cell i
-      ! if iup is a connected cell, then use averaged conductance between cell i and iup
-      j = this%jstart(i)
-      jred = this%junc_juncred(j)
-      if (jred == 0) then
-        ! average conductance between cell n and cell m
-        cond = this%dfw%get_cond(i, i - 1, 1, stage(i), stage(i - 1), cln, clm)
-      else
-        ! half cell conductance between cell i and junction jred
-        depth = stage(i) - this%dis%bot(i)
-        dx = cln
-        width = 1.d0
-        dhds = 1.D0
-        cond = this%dfw%get_cond_n(i, depth, dx, width, dhds)
-      end if
+      ! ! need conductance term for cell i in the up direction
+      ! ! if iup is a junction, then use half-cell conductance of cell i
+      ! ! if iup is a connected cell, then use averaged conductance between cell i and iup
+      ! j = this%jstart(i)
+      ! jred = this%junc_juncred(j)
+      ! if (jred == 0) then
+      !   ! average conductance between cell n and cell m
+      !   cond = this%dfw%get_cond(i, this%get_icell_up(i), 1, stage(i), stage(this%get_icell_up(i)), cln, clm)
+      ! else
+      !   ! half cell conductance between cell i and junction jred
+      !   depth = stage(i) - this%dis%bot(i)
+      !   dx = cln
+      !   width = 1.d0
+      !   dhds = 1.D0
+      !   cond = this%dfw%get_cond_n(i, depth, dx, width, dhds)
+      ! end if
 
       ! diagonal component
       iglo = i + moffset
@@ -630,7 +638,7 @@ contains
         cycle
       end if
 
-      ! diagonal
+      ! diagonal (Q term itself)
       iglo = this%jglo_qup(i, moffset)
       jglo = iglo
       ipos_sln = matrix_sln%get_position(iglo, jglo)
@@ -638,7 +646,7 @@ contains
       call matrix_sln%add_value_pos(ipos_sln, val)
 
       ! coefficient for cell head
-      jglo = i + moffset
+      jglo = moffset + i
       ipos_sln = matrix_sln%get_position(iglo, jglo)
       val = -cond
       call matrix_sln%add_value_pos(ipos_sln, val)
@@ -673,19 +681,24 @@ contains
 
       ! up side junction for this cell
       i = this%jstart(j)
+      ired = this%junc_juncred(i)
 
-      ! diagonal position
-      iglo = moffset + 3 * this%dis%nodes + i
-      jglo = iglo
-      ipos_sln = matrix_sln%get_position(iglo, jglo)
-      val = -cond ! coefficient for hj
-      call matrix_sln%add_value_pos(ipos_sln, val)
+      if (ired /= 0) then
 
-      ! global column number for cell head
-      jglo = moffset + j
-      ipos_sln = matrix_sln%get_position(iglo, jglo)
-      val = cond ! coefficient for hi
-      call matrix_sln%add_value_pos(ipos_sln, val)
+        ! diagonal position
+        iglo = moffset + this%dis%nodes + this%nq + ired
+        jglo = iglo
+        ipos_sln = matrix_sln%get_position(iglo, jglo)
+        val = -cond ! coefficient for hj
+        call matrix_sln%add_value_pos(ipos_sln, val)
+
+        ! global column number for cell head
+        jglo = moffset + j
+        ipos_sln = matrix_sln%get_position(iglo, jglo)
+        val = cond ! coefficient for hi
+        call matrix_sln%add_value_pos(ipos_sln, val)
+
+      end if
       
       ! ! up side Q
       ! jglo = this%jglo_qup(j, moffset)
@@ -695,19 +708,24 @@ contains
 
       ! dn side junction for this cell
       i = this%jend(j)
+      ired = this%junc_juncred(i)
 
-      ! diagonal position
-      iglo = moffset + 3 * this%dis%nodes + i
-      jglo = iglo
-      ipos_sln = matrix_sln%get_position(iglo, jglo)
-      val = -cond ! coefficient for hj
-      call matrix_sln%add_value_pos(ipos_sln, val)
+      if (ired /= 0) then
 
-      ! global column number for cell head
-      jglo = moffset + j
-      ipos_sln = matrix_sln%get_position(iglo, jglo)
-      val = cond ! coefficient for hi
-      call matrix_sln%add_value_pos(ipos_sln, val)
+        ! diagonal position
+        iglo = moffset + this%dis%nodes + this%nq + ired
+        jglo = iglo
+        ipos_sln = matrix_sln%get_position(iglo, jglo)
+        val = -cond ! coefficient for hj
+        call matrix_sln%add_value_pos(ipos_sln, val)
+
+        ! global column number for cell head
+        jglo = moffset + j
+        ipos_sln = matrix_sln%get_position(iglo, jglo)
+        val = cond ! coefficient for hi
+        call matrix_sln%add_value_pos(ipos_sln, val)
+
+      end if
 
       ! ! dn side Q
       ! jglo = this%jglo_qdn(j, moffset)
@@ -754,12 +772,28 @@ contains
     jred = this%junc_juncred(j)
     if (jred == 0) then ! no junction on upside
       ! calculate position for next up side cell
-      jglo = moffset + node - 1
+      jglo = moffset + this%get_icell_up(node)
     else
       ! use location of junction head
       jglo = moffset + this%dis%nodes + this%nq + jred
     end if
   end function jglo_hup
+
+  !> @ brief Return number of up side cell
+  function get_icell_up(this, node) result(icell_up)
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: node
+    integer(I4B) :: icell_up
+    icell_up = this%icellup(node)
+  end function get_icell_up
+
+  !> @ brief Return number of up side cell
+  function get_icell_dn(this, node) result(icell_dn)
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: node
+    integer(I4B) :: icell_dn
+    icell_dn = this%icelldn(node)
+  end function get_icell_dn
 
   !> @ brief Return position in x array for junction head on down side of cell
   function jglo_hdn(this, node, moffset) result(jglo)
@@ -862,6 +896,10 @@ contains
                       this%memoryPath)
     call mem_allocate(this%irowqup, this%dis%nodesuser, 'IROWQUP', &
                       this%memoryPath)
+    call mem_allocate(this%icellup, this%dis%nodesuser, 'ICELLUP', &
+                      this%memoryPath)
+    call mem_allocate(this%icelldn, this%dis%nodesuser, 'ICELLDN', &
+                      this%memoryPath)
 
     do n = 1, size(this%junc_ivert)
       this%junc_ivert(n) = 0
@@ -886,6 +924,12 @@ contains
     end do
     do n = 1, size(this%irowqdn)
       this%irowqdn(n) = 0
+    end do
+    do n = 1, size(this%icellup)
+      this%icellup(n) = 0
+    end do
+    do n = 1, size(this%icelldn)
+      this%icelldn(n) = 0
     end do
 
   end subroutine allocate_arrays
@@ -1862,6 +1906,8 @@ contains
     call mem_deallocate(this%juncred_junc)
     call mem_deallocate(this%irowqdn)
     call mem_deallocate(this%irowqup)
+    call mem_deallocate(this%icellup)
+    call mem_deallocate(this%icelldn)
   !   call mem_deallocate(this%manningsn)
   !   call mem_deallocate(this%idcxs)
   !   call mem_deallocate(this%icelltype)
@@ -2584,11 +2630,13 @@ contains
 
   end subroutine fill_junc_juncred
 
-  subroutine fill_irow_qupdn(jstart, jend, junc_jred, nq, irowqup, irowqdn)
+  subroutine fill_irow_qupdn(jstart, jend, junc_jred, icellup, nq, irowqup, &
+                             irowqdn)
     ! dummy
     integer(I4B), dimension(:), intent(in) :: jstart !< junction for up side
     integer(I4B), dimension(:), intent(in) :: jend !< junction for down side
     integer(I4B), dimension(:), intent(in) :: junc_jred !< junction for down side
+    integer(I4B), dimension(:), intent(in) :: icellup !< cell number of up side cell
     integer(I4B), intent(inout) :: nq !< number of unique q equations
     integer(I4B), dimension(:), intent(inout) :: irowqup !< map from cell number to upstream q row in equations
     integer(I4B), dimension(:), intent(inout) :: irowqdn !< map from reduced junction to junction
@@ -2616,13 +2664,45 @@ contains
         irowqup(icell) = iq
         iq = iq + 1
       else
-        ! there is no active junction on upside, so qup(icell) = -qdn(icell-1)
-        ! todo: can we assume that up side cell is icell - 1?
-        irowqup(icell) = irowqdn(icell - 1)
+        ! there is no active junction on upside, so qup(icell) = -qdn(icellup(icell))
+        irowqup(icell) = irowqdn(icellup(icell))
       end if
     end do
     nq = iq - 1
 
   end subroutine fill_irow_qupdn
+
+  subroutine fill_icellupdn(jend, iajunction_cell, jajunction_cell, icellup, &
+                            icelldn)
+    ! dummy
+    integer(I4B), dimension(:), intent(in) :: jend !< down side junction for each cell
+    integer(I4B), dimension(:), intent(in) :: iajunction_cell !< csr index for junction to cell
+    integer(I4B), dimension(:), intent(in) :: jajunction_cell !< csr junction to cell
+    integer(I4B), dimension(:), intent(inout) :: icellup !< index of up side cell; 0 if active junction
+    integer(I4B), dimension(:), intent(inout) :: icelldn !< index of dn side cell; 0 if active junction
+    ! local
+    integer(I4B) :: ijunc, ncon, ic1, ic2
+    do ijunc = 1, size(iajunction_cell) - 1
+      ncon = iajunction_cell(ijunc + 1) - iajunction_cell(ijunc)
+      if (ncon == 2) then
+        ! evaluate two cells and assign icellup
+        ic1 = jajunction_cell(iajunction_cell(ijunc))
+        ic2 = jajunction_cell(iajunction_cell(ijunc) + 1)
+
+        ! ic2 is down from ic1, so icellup(ic2) = ic1
+        if(jend(ic1) == ijunc) then
+          icellup(ic2) = ic1
+          icelldn(ic1) = ic2
+        end if
+
+        ! ic1 is down from ic2, so icellup(ic1) = ic2
+        if (jend(ic2) == ijunc) then
+          icellup(ic1) = ic2
+          icelldn(ic2) = ic1
+        end if
+        
+      end if
+    end do
+  end subroutine fill_icellupdn
 
 end module SwfJncModule

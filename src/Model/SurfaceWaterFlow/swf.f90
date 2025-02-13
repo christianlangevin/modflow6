@@ -255,9 +255,9 @@ contains
 
     ! Find the position of each connection in the global ia, ja structure
     ! and store them in idxglo.
-    if (this%injnc == 0) then
+    ! if (this%injnc == 0) then
       call this%dis%dis_mc(this%moffset, this%idxglo, matrix_sln)
-    end if
+    ! end if
 
     if (this%injnc == 1) then
       call this%jnc%jnc_mc(this%moffset, this%idxglo, matrix_sln)
