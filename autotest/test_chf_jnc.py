@@ -46,6 +46,7 @@ def build_models(idx, test):
         no_ptcrecord="ALL",
         print_option="all",
         linear_acceleration="BICGSTAB",
+        outer_maximum=100,
         outer_dvclose=1.0e-7,
         inner_dvclose=1.0e-8,
     )
@@ -73,13 +74,13 @@ def build_models(idx, test):
         cell1d=cell1d,
     )
 
-    # dfw = flopy.mf6.ModflowChfdfw(
-    #     chf,
-    #     print_flows=True,
-    #     save_flows=True,
-    #     manningsn=0.035,
-    #     idcxs=0,
-    # )
+    dfw = flopy.mf6.ModflowChfdfw(
+        chf,
+        print_flows=True,
+        save_flows=True,
+        manningsn=0.035,
+        idcxs=0,
+    )
 
     jnc = flopy.mf6.ModflowChfjnc(chf)
 

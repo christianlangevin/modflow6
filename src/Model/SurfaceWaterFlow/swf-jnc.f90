@@ -99,6 +99,10 @@ module SwfJncModule
     ! procedure :: dfw_rp
     ! procedure :: dfw_ad
     procedure :: jnc_fc
+    procedure :: jnc_fc_continuity
+    procedure :: jnc_fc_motion
+    procedure :: jnc_fc_junction
+    procedure :: jnc_fc_inertia_space
     ! procedure :: dfw_qnm_fc_nr
     ! !procedure :: dfw_qnm_fc
     ! procedure :: dfw_fn
@@ -128,6 +132,14 @@ module SwfJncModule
     procedure, private :: jglo_hdn
     procedure, private :: get_icell_up
     procedure, private :: get_icell_dn
+    procedure, private :: get_cond
+    procedure, private :: get_cond_nm
+    procedure, private :: get_cond_n
+    procedure, private :: get_qcond_n
+    procedure, private :: get_upstream_area
+    procedure, private :: get_cell_length
+    procedure, private :: get_cell_width
+    procedure, private :: get_cell_area
 
   end type SwfJncType
 
@@ -151,7 +163,7 @@ contains
     logical(LGP) :: found_fname
     ! formats
     character(len=*), parameter :: fmtheader = &
-      "(1x, /1x, 'DFW --  JUNCTION (JNC) PACKAGE, VERSION 1, 1/31/2025', &
+      "(1x, /1x, 'JNC --  JUNCTION (JNC) PACKAGE, VERSION 1, 1/31/2025', &
        &' INPUT READ FROM MEMPATH: ', A, /)"
     !
     ! Create the object
@@ -504,8 +516,110 @@ contains
   end subroutine jnc_mc
 
   !> @brief fill coefficients for jnc
-  subroutine jnc_fc(this, kiter, moffset, matrix_sln, idxglo, rhs, stage, &
-                    stage_old)
+  subroutine jnc_fc(this, kiter, moffset, matrix_sln, idxglo, rhs, xnew, &
+                    xold)
+    ! modules
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B) :: kiter
+    integer(I4B), intent(in) :: moffset
+    class(MatrixBaseType), pointer :: matrix_sln
+    integer(I4B), intent(in), dimension(:) :: idxglo
+    real(DP), intent(inout), dimension(:) :: rhs
+    real(DP), intent(inout), dimension(:) :: xnew
+    real(DP), intent(inout), dimension(:) :: xold
+    ! local
+
+    ! add coefficients for continuity equations
+    call this%jnc_fc_continuity(kiter, moffset, matrix_sln, idxglo, &
+                                rhs, xnew, xold)
+
+    ! add coefficients for motion equations
+    call this%jnc_fc_motion(kiter, moffset, matrix_sln, idxglo, &
+                            rhs, xnew, xold)
+
+    ! add coefficients for junction equations
+    call this%jnc_fc_junction(kiter, moffset, matrix_sln, idxglo, &
+                              rhs, xnew, xold)
+
+    ! add coefficients for spatial inertia
+    call this%jnc_fc_inertia_space(kiter, moffset, matrix_sln, idxglo, &
+                                   rhs, xnew, xold)
+
+  end subroutine jnc_fc
+
+  !> @brief fill coefficients for jnc
+  subroutine jnc_fc_continuity(this, kiter, moffset, matrix_sln, idxglo, rhs, &
+                               stage, stage_old)
+    ! modules
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B) :: kiter
+    integer(I4B), intent(in) :: moffset
+    class(MatrixBaseType), pointer :: matrix_sln
+    integer(I4B), intent(in), dimension(:) :: idxglo
+    real(DP), intent(inout), dimension(:) :: rhs
+    real(DP), intent(inout), dimension(:) :: stage
+    real(DP), intent(inout), dimension(:) :: stage_old
+    ! local
+    integer(I4B) :: ipos_sln
+    integer(I4B) :: i, j, iglo, jglo
+    real(DP) :: cond, val
+
+    ! add coefficients for cell continuity equations
+    ! cell continuity equation -- each row has a diagonal component (hn)
+    ! and Qup and Qdn components
+    do i = 1, this%dis%nodes
+
+      ! set iglo
+      iglo = i + moffset
+
+      ! set j to connected node on up side
+      j = this%jglo_hup(i, 0)
+      jglo = j + moffset
+      cond = this%get_cond(i, j, stage(i), stage(j))
+
+      ! diagonal component Q = C*(hup - hi)
+      call matrix_sln%add_diag_value(iglo, -cond)
+
+      ! head in junction or cell on up side
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      call matrix_sln%add_value_pos(ipos_sln, cond)
+
+      ! set j to connected node on dn side
+      j = this%jglo_hdn(i, 0)
+      jglo = j + moffset
+      cond = this%get_cond(i, j, stage(i), stage(j))
+
+      ! diagonal component Q = C * (hdn - hi)
+      call matrix_sln%add_diag_value(iglo, -cond)
+
+      ! head in junction or cell on dn side
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      call matrix_sln%add_value_pos(ipos_sln, cond)
+
+      ! spatial intertial term on up side
+      jglo = this%jglo_qup(i, moffset)
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = DZERO ! this will be a spatial inertial term
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+      ! spatial intertial term on dn side
+      jglo = this%jglo_qdn(i, moffset)
+      ipos_sln = matrix_sln%get_position(iglo, jglo)
+      val = DZERO ! this will be a spatial inertial term
+      call matrix_sln%add_value_pos(ipos_sln, val)
+
+
+      ! todo: add other flow terms (inertia, wind, etc.)
+
+    end do
+
+  end subroutine jnc_fc_continuity
+
+  !> @brief fill coefficients for jnc
+  subroutine jnc_fc_motion(this, kiter, moffset, matrix_sln, idxglo, rhs, stage, &
+                           stage_old)
     ! modules
     ! dummy
     class(SwfJncType) :: this !< this instance
@@ -523,76 +637,6 @@ contains
     real(DP) :: cond
     real(DP) :: depth, dx, width, dhds, cln, clm
 
-    ! half cell conductance for cell i (what head should this be a function of?)
-    cond = 1.d0 ! this is half-cell conductance for cell i
-
-    ! add coefficients for cell continuity equations
-    ! cell continuity equation -- each row has a diagonal component (hn)
-    ! and Qup and Qdn components
-    do i = 1, this%dis%nodes
-
-      ! cln = 500.d0
-      ! clm = 500.d0
-
-      ! ! need conductance term for cell i in the up direction
-      ! ! if iup is a junction, then use half-cell conductance of cell i
-      ! ! if iup is a connected cell, then use averaged conductance between cell i and iup
-      ! j = this%jstart(i)
-      ! jred = this%junc_juncred(j)
-      ! if (jred == 0) then
-      !   ! average conductance between cell n and cell m
-      !   cond = this%dfw%get_cond(i, this%get_icell_up(i), 1, stage(i), stage(this%get_icell_up(i)), cln, clm)
-      ! else
-      !   ! half cell conductance between cell i and junction jred
-      !   depth = stage(i) - this%dis%bot(i)
-      !   dx = cln
-      !   width = 1.d0
-      !   dhds = 1.D0
-      !   cond = this%dfw%get_cond_n(i, depth, dx, width, dhds)
-      ! end if
-
-      ! diagonal component
-      iglo = i + moffset
-      jglo = iglo
-      ipos_sln = matrix_sln%get_position(iglo, jglo)
-      val = -cond ! sum of conductance terms; TODO: and then there will be a storage term
-      call matrix_sln%add_value_pos(ipos_sln, val)
-
-      ! head in junction or cell on up side
-      jglo = this%jglo_hup(i, moffset)
-      ipos_sln = matrix_sln%get_position(iglo, jglo)
-      ! todo: will need to know whether this is half cell junction cond or averaged cell-cell cond
-      val = cond ! conductance term and then there will be a storage term
-      call matrix_sln%add_value_pos(ipos_sln, val)
-
-      ! diagonal component
-      iglo = i + moffset
-      jglo = iglo
-      ipos_sln = matrix_sln%get_position(iglo, jglo)
-      val = -cond ! sum of conductance terms; TODO: and then there will be a storage term
-      call matrix_sln%add_value_pos(ipos_sln, val)
-
-      ! head in junction or cell on dn side
-      jglo = this%jglo_hdn(i, moffset)
-      ipos_sln = matrix_sln%get_position(iglo, jglo)
-      ! todo: will need to know whether this is half cell junction cond or averaged cell-cell cond
-      val = cond ! conductance term and then there will be a storage term
-      call matrix_sln%add_value_pos(ipos_sln, val)
-
-      ! ! Qup
-      ! jglo = this%jglo_qup(i, moffset)
-      ! ipos_sln = matrix_sln%get_position(iglo, jglo)
-      ! val = 1.d0  ! this should be reach length / 2
-      ! call matrix_sln%add_value_pos(ipos_sln, val)
-
-      ! ! Qdn
-      ! jglo = this%jglo_qdn(i, moffset)
-      ! ipos_sln = matrix_sln%get_position(iglo, jglo)
-      ! val = 1.d0  ! this should be reach length / 2
-      ! call matrix_sln%add_value_pos(ipos_sln, val)
-
-    end do
-
     ! motion equations -- each row has a coefficient entry for the Q itself,
     ! the cell head, the junction head, and the Q on the other side of the reach
     do i = 1, this%dis%nodes
@@ -600,22 +644,22 @@ contains
 
       ! diagonal
       iglo = this%jglo_qdn(i, moffset)
-      jglo = iglo
-      ipos_sln = matrix_sln%get_position(iglo, jglo)
       val = -1.d0 ! will also need to add temporal intertial term
-      call matrix_sln%add_value_pos(ipos_sln, val)
+      call matrix_sln%add_diag_value(iglo, val)
 
-      ! cell head
+      ! add effects of Q = C * (hj - hi) to motion equation
+      j = this%jglo_hdn(i, 0)
+      cond = this%get_cond(i, j, stage(i), stage(j))
+
+      ! add -cond to column for cell i
       jglo = i + moffset
       ipos_sln = matrix_sln%get_position(iglo, jglo)
-      val = -cond
-      call matrix_sln%add_value_pos(ipos_sln, val)
+      call matrix_sln%add_value_pos(ipos_sln, -cond)
 
-      ! junction or cell head on dn side
+      ! add cond to column for cell j
       jglo = this%jglo_hdn(i, moffset)
       ipos_sln = matrix_sln%get_position(iglo, jglo)
-      val = cond
-      call matrix_sln%add_value_pos(ipos_sln, val)
+      call matrix_sln%add_value_pos(ipos_sln, cond)
 
       ! flow on other side (up)
       jglo = this%jglo_qup(i, moffset)
@@ -638,24 +682,24 @@ contains
         cycle
       end if
 
-      ! diagonal (Q term itself)
+      ! diagonal
       iglo = this%jglo_qup(i, moffset)
-      jglo = iglo
-      ipos_sln = matrix_sln%get_position(iglo, jglo)
       val = -1.d0 ! will also need to add temporal intertial term
-      call matrix_sln%add_value_pos(ipos_sln, val)
+      call matrix_sln%add_diag_value(iglo, val)
 
-      ! coefficient for cell head
-      jglo = moffset + i
+      ! add effects of Q = C * (hj - hi) to motion equation
+      j = this%jglo_hup(i, 0)
+      cond = this%get_cond(i, j, stage(i), stage(j))
+
+      ! add -cond to column for cell i
+      jglo = i + moffset
       ipos_sln = matrix_sln%get_position(iglo, jglo)
-      val = -cond
-      call matrix_sln%add_value_pos(ipos_sln, val)
+      call matrix_sln%add_value_pos(ipos_sln, -cond)
 
-      ! junction head on up side
+      ! add cond to column for cell j
       jglo = this%jglo_hup(i, moffset)
       ipos_sln = matrix_sln%get_position(iglo, jglo)
-      val = cond
-      call matrix_sln%add_value_pos(ipos_sln, val)
+      call matrix_sln%add_value_pos(ipos_sln, cond)
 
       ! flow on other side (dn)
       jglo = this%jglo_qdn(i, moffset)
@@ -665,18 +709,29 @@ contains
     
     end do
 
-    ! ! add diagonal for each junction
-    ! do i = 1, this%njunction
+  end subroutine jnc_fc_motion
 
-    !   ! global row number for this junction
-    !   iglo = moffset + 3 * this%dis%nodes + i
-    !   jglo = iglo
-    !   ipos_sln = matrix_sln%get_position(iglo, jglo)
-    !   val = DZERO ! no diagonal term for junctions
-    !   call matrix_sln%add_value_pos(ipos_sln, val)
+  !> @brief fill coefficients for jnc
+  subroutine jnc_fc_junction(this, kiter, moffset, matrix_sln, idxglo, rhs, stage, &
+                             stage_old)
+    ! modules
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B) :: kiter
+    integer(I4B), intent(in) :: moffset
+    class(MatrixBaseType), pointer :: matrix_sln
+    integer(I4B), intent(in), dimension(:) :: idxglo
+    real(DP), intent(inout), dimension(:) :: rhs
+    real(DP), intent(inout), dimension(:) :: stage
+    real(DP), intent(inout), dimension(:) :: stage_old
+    ! local
+    integer(I4B) :: ipos_sln
+    integer(I4B) :: i, j, iglo, jglo, jred, ired, iloc
+    real(DP) :: val
+    real(DP) :: cond
+    real(DP) :: depth, dx, width, dhds, cln, clm
 
-    ! end do
-
+    ! junction equations
     do j = 1, this%dis%nodes
 
       ! up side junction for this cell
@@ -686,7 +741,9 @@ contains
       if (ired /= 0) then
 
         ! diagonal position
-        iglo = moffset + this%dis%nodes + this%nq + ired
+        iloc = this%dis%nodes + this%nq + ired
+        cond = this%get_cond(iloc, j, stage(i), stage(j))
+        iglo = moffset + iloc
         jglo = iglo
         ipos_sln = matrix_sln%get_position(iglo, jglo)
         val = -cond ! coefficient for hj
@@ -713,7 +770,9 @@ contains
       if (ired /= 0) then
 
         ! diagonal position
-        iglo = moffset + this%dis%nodes + this%nq + ired
+        iloc = this%dis%nodes + this%nq + ired
+        cond = this%get_cond(iloc, j, stage(i), stage(j))
+        iglo = moffset + iloc
         jglo = iglo
         ipos_sln = matrix_sln%get_position(iglo, jglo)
         val = -cond ! coefficient for hj
@@ -735,7 +794,483 @@ contains
 
     end do
 
-  end subroutine jnc_fc
+  end subroutine jnc_fc_junction
+
+  !> @brief fill coefficients for spatial intertial terms
+  subroutine jnc_fc_inertia_space(this, kiter, moffset, matrix_sln, idxglo, &
+                                  rhs, xnew, xold)
+    ! modules
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B) :: kiter
+    integer(I4B), intent(in) :: moffset
+    class(MatrixBaseType), pointer :: matrix_sln
+    integer(I4B), intent(in), dimension(:) :: idxglo
+    real(DP), intent(inout), dimension(:) :: rhs
+    real(DP), intent(inout), dimension(:) :: xnew
+    real(DP), intent(inout), dimension(:) :: xold
+    ! local
+    integer(I4B) :: ipos_sln
+    integer(I4B) :: i, j, iglo, jglo, jred, ired, iloc
+    integer(I4B) :: jup, jdn
+    real(DP) :: qup
+    real(DP) :: qdn
+    real(DP) :: stage
+    real(DP) :: stageup
+    real(DP) :: stagedn
+    real(DP) :: depth
+    real(DP) :: area
+    real(DP) :: areaup
+    real(DP) :: areadn
+    real(DP) :: dx
+    real(DP) :: width
+    real(DP) :: ccoef
+    real(DP) :: dcoef
+    real(DP) :: ecoef
+    real(DP) :: val
+    real(DP) :: cond
+    real(DP) :: beta
+    real(DP) :: gravity = 9.81d0
+
+    ! junction equations
+    do j = 1, this%dis%nodes
+
+      ! up side junction for this cell
+      i = this%jstart(j)
+      ired = this%junc_juncred(i)
+
+      if (ired /= 0) then
+
+        ! There is a junction attached to the starting end of this cell.  Add
+        ! a coefficient to the Q on the starting side and the ending side to
+        ! account for the spatial inertial terms
+
+        ! assign matrix row number as continuity equation for cell j
+        iglo = moffset + j
+
+        ! set jglo to column number of Q on up side
+        jglo = this%jglo_qup(j, moffset)
+
+        ! find the cell or junction number on the up side
+        jup = this%jglo_hup(j, 0)
+
+        ! set qup as last iterate of q on up side of this cell
+        ! todo: for first iteration, does this mean we need initial conditions for q?
+        qup = xnew(this%jglo_qup(j, 0))
+
+        ! assign variables for this cell
+        stage = xnew(j)
+        stageup = xnew(jup)
+        area = this%get_cell_area(j, stage)
+        dx = this%get_cell_length(j)
+        width = this%get_cell_width(j)
+        depth = stage - this%dis%bot(j)  ! todo: smooth?
+        areaup = this%get_upstream_area(j, jup, stage, stageup)
+
+        ! calculate coefficients
+        ccoef = this%get_qcond_n(j, depth, dx, width, qup)        
+        dcoef = get_d_coeff(ccoef, dx, area, gravity)
+        beta = 1.d0
+        ecoef = get_e_coeff(dcoef, beta)
+
+        ! calculate and fill matrix coefficient
+        val = ecoef / dx * qup / areaup
+        ipos_sln = matrix_sln%get_position(iglo, jglo)
+        call matrix_sln%add_value_pos(ipos_sln, val)
+
+        ! set jglo to column number of Q on dn side
+        jglo = this%jglo_qdn(j, moffset)
+
+        ! calculate intertial term for the dn side of cell j
+        jdn = this%jglo_hdn(j, 0)
+
+        ! set qdn as last iterate of q on dn side of this cell
+        qdn = -xnew(this%jglo_qdn(j, 0))
+
+        stagedn = xnew(jdn)
+        areadn = this%get_upstream_area(j, jdn, stage, stagedn)
+
+        val = -ecoef / dx * qdn / areadn
+        ipos_sln = matrix_sln%get_position(iglo, jglo)
+        call matrix_sln%add_value_pos(ipos_sln, val)
+
+      end if
+      
+      ! dn side junction for this cell
+      i = this%jend(j)
+      ired = this%junc_juncred(i)
+
+      if (ired /= 0) then
+
+        ! There is a junction attached to the starting end of this cell.  Add
+        ! a coefficient to the Q on the starting side and the ending side to
+        ! account for the spatial inertial terms
+
+        ! assign matrix row number as continuity equation for cell j
+        iglo = moffset + j
+
+        ! set jglo to column number of Q on up side
+        jglo = this%jglo_qup(j, moffset)
+
+        ! find the cell or junction number on the up side
+        jup = this%jglo_hup(j, 0)
+
+        ! set qup as last iterate of q on up side of this cell
+        ! todo: for first iteration, does this mean we need initial conditions for q?
+        qup = xnew(this%jglo_qup(j, 0))
+
+        ! assign variables for this cell
+        stage = xnew(j)
+        stageup = xnew(jup)
+        area = this%get_cell_area(j, stage)
+        dx = this%get_cell_length(j)
+        width = this%get_cell_width(j)
+        depth = stage - this%dis%bot(j)  ! todo: smooth?
+        areaup = this%get_upstream_area(j, jup, stage, stageup)
+
+        ! calculate coefficients
+        ccoef = this%get_qcond_n(j, depth, dx, width, qup)        
+        dcoef = get_d_coeff(ccoef, dx, area, gravity)
+        beta = 1.d0
+        ecoef = get_e_coeff(dcoef, beta)
+
+        ! calculate and fill matrix coefficient
+        val = ecoef / dx * qup / areaup
+        ipos_sln = matrix_sln%get_position(iglo, jglo)
+        call matrix_sln%add_value_pos(ipos_sln, val)
+
+        ! set jglo to column number of Q on dn side
+        jglo = this%jglo_qdn(j, moffset)
+
+        ! calculate intertial term for the dn side of cell j
+        jdn = this%jglo_hdn(j, 0)
+
+        ! set qdn as last iterate of q on dn side of this cell
+        qdn = -xnew(this%jglo_qdn(j, 0))
+
+        stagedn = xnew(jdn)
+        areadn = this%get_upstream_area(j, jdn, stage, stagedn)
+
+        val = -ecoef / dx * qdn / areadn
+        ipos_sln = matrix_sln%get_position(iglo, jglo)
+        call matrix_sln%add_value_pos(ipos_sln, val)
+
+      end if
+
+    end do
+
+  end subroutine jnc_fc_inertia_space
+
+  !> @ brief Return conductance
+  function get_cond(this, n, m, stage_n, stage_m) result(cond)
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: n !< cell index
+    integer(I4B), intent(in) :: m !< cell index
+    real(DP), intent(in) :: stage_n !< stage in reach n
+    real(DP), intent(in) :: stage_m !< stage in reach m
+    ! return
+    real(DP) :: cond
+    ! local
+    real(DP) :: depth_n
+    real(DP) :: cln
+    real(DP) :: width_n
+    real(DP) :: dhds_n
+    real(DP) :: depth_m
+    real(DP) :: clm
+    real(DP) :: width_m
+    real(DP) :: dhds_m
+
+    if (m > this%dis%nodes) then
+      ! return half cell conductance for cell n
+      depth_n = stage_n - this%dis%bot(n)
+      ! todo: hardwired
+      cln = DHALF * 1000.d0
+      width_n = 50.d0
+      dhds_n = abs(stage_n - stage_m) / cln
+      cond = this%get_cond_n(n, depth_n, cln, width_n, dhds_n)
+      return
+    end if
+
+    if (n > this%dis%nodes) then
+      ! return half cell conductance for cell m
+      depth_m = stage_m - this%dis%bot(m)
+      ! todo: hardwired
+      clm = DHALF * 1000.d0
+      width_m = 50.d0
+      dhds_m = abs(stage_n - stage_m) / clm
+      cond = this%get_cond_n(m, depth_m, clm, width_m, dhds_m)
+      return
+    end if
+
+    ! otherwise, return conductance between cells n and m
+    cond = this%get_cond_nm(n, m, stage_n, stage_m)
+
+  end function get_cond
+
+  !> @brief calculate effective conductance between cells n and m
+  !!
+  !! Calculate half-cell conductances for cell n and cell m and then use
+  !! harmonic averaging to calculate the effective conductance between the
+  !< two cells.
+  function get_cond_nm(this, n, m, stage_n, stage_m) result(cond)
+    ! modules
+    use SmoothingModule, only: sQuadratic
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: n !< number for cell n
+    integer(I4B), intent(in) :: m !< number for cell m
+    real(DP), intent(in) :: stage_n !< stage in reach n
+    real(DP), intent(in) :: stage_m !< stage in reach m
+    ! local
+    integer(I4B) :: ipos !< connection number
+    integer(I4B) :: isympos !< symmetric position indicator
+    real(DP) :: cln !< distance from cell n to shared face with m
+    real(DP) :: clm !< distance from cell m to shared face with n
+    real(DP) :: depth_n
+    real(DP) :: depth_m
+    real(DP) :: dhds_n
+    real(DP) :: dhds_m
+    real(DP) :: width_n
+    real(DP) :: width_m
+    real(DP) :: range = 1.d-6
+    real(DP) :: dydx
+    real(DP) :: smooth_factor
+    real(DP) :: length_nm
+    real(DP) :: cond
+    real(DP) :: cn
+    real(DP) :: cm
+
+    ! Set connection lengths
+    ipos = this%dis%con%getjaindex(n, m)  !todo: this is probably slow
+    isympos = this%dis%con%jas(ipos)
+    if (n < m) then
+      cln = this%dis%con%cl1(isympos)
+      clm = this%dis%con%cl2(isympos)
+    else
+      cln = this%dis%con%cl2(isympos)
+      clm = this%dis%con%cl1(isympos)
+    end if
+
+    ! we are using a harmonic conductance approach here; however
+    ! the SWR Process for MODFLOW-2005/NWT uses length-weighted
+    ! average areas and hydraulic radius instead.
+    length_nm = cln + clm
+    cond = DZERO
+    if (length_nm > DPREC) then
+
+      ! Calculate depth in each reach
+      depth_n = stage_n - this%dis%bot(n)
+      depth_m = stage_m - this%dis%bot(m)
+
+      ! assign gradients
+      !if (this%is2d == 0) then
+        dhds_n = abs(stage_m - stage_n) / (cln + clm)
+        dhds_m = dhds_n
+      ! else
+      !   dhds_n = this%grad_dhds_mag(n)
+      !   dhds_m = this%grad_dhds_mag(m)
+      ! end if
+
+      ! Assign upstream depth, if not central
+      if (this%dfw%icentral == 0) then
+        ! use upstream weighting
+        if (stage_n > stage_m) then
+          depth_m = depth_n
+        else
+          depth_n = depth_m
+        end if
+      end if
+
+      ! Calculate a smoothed depth that goes to zero over
+      ! the specified range
+      call sQuadratic(depth_n, range, dydx, smooth_factor)
+      depth_n = depth_n * smooth_factor
+      call sQuadratic(depth_m, range, dydx, smooth_factor)
+      depth_m = depth_m * smooth_factor
+
+      ! Get the flow widths for n and m from dis package
+      call this%dis%get_flow_width(n, m, ipos, width_n, width_m)
+
+      ! Calculate half-cell conductance for reach
+      ! n and m
+      cn = this%get_cond_n(n, depth_n, cln, width_n, dhds_n)
+      cm = this%get_cond_n(m, depth_m, clm, width_m, dhds_m)
+
+      ! Use harmonic mean to calculate weighted
+      ! conductance between the centers of reaches
+      ! n and m
+      if ((cn + cm) > DPREC) then
+        cond = cn * cm / (cn + cm)
+      else
+        cond = DZERO
+      end if
+
+    end if
+
+  end function get_cond_nm
+
+  !> @brief Calculate half cell conductance
+  !!
+  !! Calculate half-cell conductance for cell n
+  !< using conveyance and Manning's equation
+  function get_cond_n(this, n, depth, dx, width, dhds) result(c)
+    ! modules
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: n !< reach number
+    real(DP), intent(in) :: depth !< simulated depth (stage - elevation) in reach n for this iteration
+    real(DP), intent(in) :: dx !< half-cell distance
+    real(DP), intent(in) :: width !< width of the reach perpendicular to flow
+    real(DP), intent(in) :: dhds !< gradient
+    ! return
+    real(DP) :: c
+    ! local
+    real(DP) :: rough
+    real(DP) :: dhds_sqr
+    real(DP) :: conveyance
+
+    ! Calculate conveyance, which is a * r**DTWOTHIRDS / roughc
+    rough = this%dfw%manningsn(n)
+    conveyance = this%dfw%cxs%get_conveyance(this%dfw%idcxs(n), width, depth, rough)
+    dhds_sqr = dhds**DHALF
+    if (dhds_sqr < DEM10) then
+      dhds_sqr = DEM10
+    end if
+
+    ! Multiply by unitconv and divide conveyance by sqrt of friction slope and dx
+    c = this%dfw%unitconv * conveyance / dx / dhds_sqr
+
+  end function get_cond_n
+
+  !> @brief Calculate half cell conductance using revised Q-based approach
+  !<
+  function get_qcond_n(this, n, depth, dx, width, q) result(c)
+    ! modules
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: n !< reach number
+    real(DP), intent(in) :: depth !< simulated depth (stage - elevation) in reach n for this iteration
+    real(DP), intent(in) :: dx !< half-cell distance
+    real(DP), intent(in) :: width !< width of the reach perpendicular to flow
+    real(DP), intent(in) :: q !< flow rate
+    ! return
+    real(DP) :: c
+    ! local
+    real(DP) :: rough
+    real(DP) :: denom
+    real(DP) :: conveyance
+
+    ! Calculate conveyance, which is a * r**DTWOTHIRDS / roughc
+    rough = this%dfw%manningsn(n)
+    conveyance = this%dfw%cxs%get_conveyance(this%dfw%idcxs(n), width, depth, rough)
+    denom = abs(q)
+    if (denom < DEM10) then
+      denom = DEM10
+    end if
+
+    c = this%dfw%unitconv * conveyance ** 2 / denom / dx
+
+  end function get_qcond_n
+
+  !> @brief Calculate upstream area
+  !<
+  function get_upstream_area(this, n, m, stage_n, stage_m) result(area_up)
+    ! modules
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: n !< reach number
+    integer(I4B), intent(in) :: m !< reach or junction number
+    real(DP), intent(in) :: stage_n !< simulated stage for n
+    real(DP), intent(in) :: stage_m !< simulated stage for m
+    ! return
+    real(DP) :: area_up
+    ! local
+
+    if (stage_n > stage_m) then
+      ! n is upstream of m
+      area_up = this%get_cell_area(n, stage_n)
+    else
+      ! m is upstream of n
+      if (m > this%dis%nodes) then
+        ! m must be a junction that is upstream of n
+        ! use channel geometry of cell n with stage of junction m
+        area_up = this%get_cell_area(n, stage_m)
+      else
+        ! m must be a cell upstream of n
+        area_up = this%get_cell_area(m, stage_m)
+      end if
+    end if
+
+  end function get_upstream_area
+
+  !> @brief Calculate C coefficient
+  !<
+  function get_c_coeff(q, a, r, rough, dx) result(c)
+    ! modules
+    ! dummy
+    real(DP), intent(in) :: q !< flow rate in L**3/T
+    real(DP), intent(in) :: a !< cross sectional flow area
+    real(DP), intent(in) :: r !< hydraulic radius
+    real(DP), intent(in) :: rough !< mannings roughness coefficient
+    real(DP), intent(in) :: dx !< cell length
+    ! return
+    real(DP) :: c
+    ! local
+
+    c = DONE / q * a ** 2 * r ** (4.d0 / 3.d0) / (rough ** 2 * dx)
+
+  end function get_c_coeff
+
+  !> @brief Calculate D coefficient
+  !<
+  function get_d_coeff(cond, dx, area, g) result(d)
+    ! modules
+    ! dummy
+    real(DP), intent(in) :: cond !< conductance
+    real(DP), intent(in) :: dx !< half-cell distance
+    real(DP), intent(in) :: area !< cross sectional flow area
+    real(DP), intent(in) :: g !< gravitational constant
+    ! return
+    real(DP) :: d
+    ! local
+
+    d = cond * dx / area / g
+
+  end function get_d_coeff
+
+  !> @brief Calculate E coefficient
+  !<
+  function get_e_coeff(dcoef, beta) result(e)
+    ! modules
+    ! dummy
+    real(DP), intent(in) :: dcoef !< d coefficient
+    real(DP), intent(in) :: beta !< beta
+    ! return
+    real(DP) :: e
+    ! local
+
+    e = dcoef * beta
+
+  end function get_e_coeff
+
+  !> @brief Calculate F coefficient
+  !<
+  function get_f_coeff(dcoef, epsilon, b, ua, alpha) result(f)
+    ! modules
+    ! dummy
+    real(DP), intent(in) :: dcoef !< d coefficient
+    real(DP), intent(in) :: epsilon !< epsilon
+    real(DP), intent(in) :: b !< top width
+    real(DP), intent(in) :: ua !< wind magnitude ?
+    real(DP), intent(in) :: alpha !< wind angle ?
+    ! return
+    real(DP) :: f
+    ! local
+
+    f = dcoef * epsilon * b * ua ** 2 * cos(alpha)
+
+  end function get_f_coeff
 
   !> @ brief Return position in x array for flow on up side
   function jglo_qup(this, node, moffset) result(jglo)
@@ -2704,5 +3239,46 @@ contains
       end if
     end do
   end subroutine fill_icellupdn
+
+  function get_cell_length(this, n) result(dx)
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: n
+    real(DP) :: dx
+    select type (dis => this%dis)
+    class is (Disv1dType)
+      dx = dis%length(n)
+    end select
+  end function get_cell_length
+
+  function get_cell_width(this, n) result(width)
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: n
+    real(DP) :: width
+    select type (dis => this%dis)
+    class is (Disv1dType)
+      width = dis%width(n)
+    end select
+  end function get_cell_width
+
+  function get_cell_area(this, n, stage) result(area)
+    ! dummy
+    class(SwfJncType) :: this !< this instance
+    integer(I4B), intent(in) :: n
+    real(DP), intent(in) :: stage
+    ! return
+    real(DP) :: area
+    ! local
+    integer(I4B) :: idcxs
+    real(DP) :: width
+    real(DP) :: depth
+
+    idcxs = this%dfw%idcxs(n)
+    width = this%get_cell_width(n)
+    depth = stage - this%dis%bot(n)
+    area = this%cxs%get_area(idcxs, width, depth)    
+
+  end function get_cell_area
 
 end module SwfJncModule
