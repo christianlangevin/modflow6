@@ -1,0 +1,21 @@
+% DO NOT MODIFY THIS FILE DIRECTLY.  IT IS CREATED BY mf6ivar.py 
+
+\item \textbf{Block: OPTIONS}
+
+\begin{description}
+\item \texttt{ZETA}---keyword to specify that record corresponds to zeta.
+
+\item \texttt{FILEOUT}---keyword to specify that an output filename is expected next.
+
+\item \texttt{zetafile}---name of the binary output file to write zeta information.  This zeta output file has the same format as the binary heads file.
+
+\item \texttt{TVA6}---keyword to specify that record corresponds to a time varying array input file.
+
+\item \texttt{FILEIN}---keyword to specify that an input filename is expected next.
+
+\item \texttt{tva6\_filename}---name of the time varying array input file.  The TVA file is a generic file for inputting time varying array data.  If the TVA file is specified in the options block, then the provided TVA file must have a SALTWATER\_HEAD auxiliary variable.  This SALTWATER\_HEAD auxiliary variable, which can vary during the simulation, will be assigned as the saltwater head used by the SWI Package. During solution of the freshwater flow equation, the provided SALTWATER\_HEAD array will remain fixed.  A common use case for providing SALTWATER\_HEAD in a TVA input file is to specify a sea level elevation that changes with time.  A description for the format of the TVA file is provided in a separate section.  If not specified, then the saltwater head will be set to zero, or to the saltwater\_head value that can be specified here as an option.
+
+\item \texttt{saltwater\_head}---specified saltwater head value.  This saltwater head value will be assigned as the saltwater head used by the SWI Package. During solution of the freshwater flow equation the specified saltwater head will remain fixed.  A common use case for providing saltwater head is to set it equal to sea level, provided that sea level is not zero and does not change with time.  If not specified, and the TVA input option is not specified, then the default value for saltwater head is zero.  If the saltwater head option is specified and TVA input is also provided, then the TVA input will override the saltwater head option.
+
+\end{description}
+

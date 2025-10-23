@@ -122,6 +122,7 @@
 		<File RelativePath="..\src\Exchange\exg-gwtgwt.f90"/>
 		<File RelativePath="..\src\Exchange\exg-olfgwf.f90"/>
 		<File RelativePath="..\src\Exchange\exg-swfgwf.f90"/>
+		<File RelativePath="..\src\Exchange\exg-swiswi.f90"/>
 		<File RelativePath="..\src\Exchange\GhostNode.f90"/>
 		<File RelativePath="..\src\Exchange\GwfExchangeMover.f90"/>
 		<File RelativePath="..\src\Exchange\NumericalExchange.f90"/></Filter>
@@ -160,6 +161,8 @@
 		<File RelativePath="..\src\Idm\exg-gwfprtidm.f90"/>
 		<File RelativePath="..\src\Idm\exg-gwtgwtidm.f90"/>
 		<File RelativePath="..\src\Idm\exg-olfgwfidm.f90"/>
+		<File RelativePath="..\src\Idm\exg-swfgwfidm.f90"/>
+		<File RelativePath="..\src\Idm\exg-swiswiidm.f90"/>
 		<File RelativePath="..\src\Idm\gwe-advidm.f90"/>
 		<File RelativePath="..\src\Idm\gwe-cndidm.f90"/>
 		<File RelativePath="..\src\Idm\gwe-ctpidm.f90"/>
@@ -196,6 +199,7 @@
 		<File RelativePath="..\src\Idm\gwf-rividm.f90"/>
 		<File RelativePath="..\src\Idm\gwf-rivgidm.f90"/>
 		<File RelativePath="..\src\Idm\gwf-stoidm.f90"/>
+		<File RelativePath="..\src\Idm\gwf-swiidm.f90"/>
 		<File RelativePath="..\src\Idm\gwf-vscidm.f90"/>
 		<File RelativePath="..\src\Idm\gwf-welidm.f90"/>
 		<File RelativePath="..\src\Idm\gwf-welgidm.f90"/>
@@ -254,6 +258,8 @@
 		<File RelativePath="..\src\Idm\utl-hpcidm.f90"/>
 		<File RelativePath="..\src\Idm\utl-ncfidm.f90"/></Filter>
 		<Filter Name="Model">
+		<Filter Name="ChannelFlow">
+		<File RelativePath="..\src\Model\ChannelFlow\chf.f90"/></Filter>
 		<Filter Name="Connection">
 		<File RelativePath="..\src\Model\Connection\CellWithNbrs.f90"/>
 		<File RelativePath="..\src\Model\Connection\ConnectionBuilder.f90"/>
@@ -295,7 +301,7 @@
 		<Filter Name="submodules">
 		<File RelativePath="..\src\Model\GroundWaterFlow\submodules\gwf-sfr-constant.f90"/>
 		<File RelativePath="..\src\Model\GroundWaterFlow\submodules\gwf-sfr-steady.f90"/>
-	    <File RelativePath="..\src\Model\GroundWaterFlow\submodules\gwf-sfr-transient.f90"/></Filter>
+		<File RelativePath="..\src\Model\GroundWaterFlow\submodules\gwf-sfr-transient.f90"/></Filter>
 		<File RelativePath="..\src\Model\GroundWaterFlow\gwf-api.f90"/>
 		<File RelativePath="..\src\Model\GroundWaterFlow\gwf-buy.f90"/>
 		<File RelativePath="..\src\Model\GroundWaterFlow\gwf-chd.f90"/>
@@ -315,6 +321,7 @@
 		<File RelativePath="..\src\Model\GroundWaterFlow\gwf-riv.f90"/>
 		<File RelativePath="..\src\Model\GroundWaterFlow\gwf-sfr.f90"/>
 		<File RelativePath="..\src\Model\GroundWaterFlow\gwf-sto.f90"/>
+		<File RelativePath="..\src\Model\GroundWaterFlow\gwf-swi.f90"/>
 		<File RelativePath="..\src\Model\GroundWaterFlow\gwf-tvk.f90"/>
 		<File RelativePath="..\src\Model\GroundWaterFlow\gwf-tvs.f90"/>
 		<File RelativePath="..\src\Model\GroundWaterFlow\gwf-uzf.f90"/>
@@ -351,7 +358,6 @@
 		<File RelativePath="..\src\Model\ModelUtilities\GwfStorageUtils.f90"/>
 		<File RelativePath="..\src\Model\ModelUtilities\GwfVscInputData.f90"/>
 		<File RelativePath="..\src\Model\ModelUtilities\GwtDspOptions.f90"/>
-		<File RelativePath="..\src\Model\ModelUtilities\TspSpc.f90"/>
 		<File RelativePath="..\src\Model\ModelUtilities\ModelPackageInput.f90"/>
 		<File RelativePath="..\src\Model\ModelUtilities\Mover.f90"/>
 		<File RelativePath="..\src\Model\ModelUtilities\PackageMover.f90"/>
@@ -362,13 +368,12 @@
 		<File RelativePath="..\src\Model\ModelUtilities\TimeSelect.f90"/>
 		<File RelativePath="..\src\Model\ModelUtilities\TimeStepSelect.f90"/>
 		<File RelativePath="..\src\Model\ModelUtilities\TspAdvOptions.f90"/>
+		<File RelativePath="..\src\Model\ModelUtilities\TspSpc.f90"/>
 		<File RelativePath="..\src\Model\ModelUtilities\UzfCellGroup.f90"/>
 		<File RelativePath="..\src\Model\ModelUtilities\UzfEtUtil.f90"/>
 		<File RelativePath="..\src\Model\ModelUtilities\VectorInterpolation.f90"/>
 		<File RelativePath="..\src\Model\ModelUtilities\Xt3dAlgorithm.f90"/>
 		<File RelativePath="..\src\Model\ModelUtilities\Xt3dInterface.f90"/></Filter>
-		<Filter Name="ChannelFlow">
-		<File RelativePath="..\src\Model\ChannelFlow\chf.f90"/></Filter>
 		<Filter Name="OverlandFlow">
 		<File RelativePath="..\src\Model\OverlandFlow\olf.f90"/></Filter>
 		<Filter Name="ParticleTracking">
@@ -735,6 +740,7 @@
 		<File RelativePath="..\src\Utilities\Table.f90"/>
 		<File RelativePath="..\src\Utilities\TableTerm.f90"/>
 		<File RelativePath="..\src\Utilities\Timer.f90"/>
+		<File RelativePath="..\src\Utilities\UtlTva.f90"/>
 		<File RelativePath="..\src\Utilities\version.f90"/></Filter>
 		<File RelativePath="..\src\mf6core.f90"/>
 		<File RelativePath="..\src\mf6lists.f90"/>

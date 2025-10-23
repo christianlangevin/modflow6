@@ -107,6 +107,12 @@ Cell-by-cell stress flows are flow rates into or out of the model, at a particul
 \subsection{Buoyancy (BUY) Package}
 \input{gwf/buy}
 
+\IfFileExists{develop.version}{
+\newpage
+\subsection{Sea Water Intrusion (SWI) Package}
+\input{gwf/swi}
+}{}
+
 \newpage
 \subsection{Viscosity (VSC) Package}
 \input{gwf/vsc}

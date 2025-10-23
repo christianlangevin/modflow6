@@ -1,0 +1,5 @@
+BEGIN options
+  ZETA  FILEOUT  mymodel.zta
+  TVA6  FILEIN  mymodel.swi.tva
+  SALTWATER_HEAD 0.5
+END options

@@ -1,0 +1,36 @@
+Input to the Sea Water Intrusion (SWI) Package is read from the file that has type ``SWI6'' in the Name File.  If the SWI Package is included for a model, then the model will calculate the position of the freshwater interface in each cell and calculate flow accordingly.
+
+For some applications, it may be necessary to specify the saltwater head as an array that changes with time.  As described in the options block for TVA6, the  \hyperref[sec:tva]{Time Variable Array (TVA) Utility} can be used to specify the saltwater head .
+
+The following points should be considered when using the SWI Package:
+
+\begin{itemize}
+
+\item The SWI Package should not be used with the Buoyancy Package.  They are not compatible.
+\item In most cases, the ocean should be represented using General-Head Boundaries (GHBs).  The head value assigned for GHBs should be the equivalent freshwater head calculated at the sea floor.  This equivalent freshwater head should be calculated based on the height of the overlying column of seawater.
+\item For some applications, the sea level elevation may not be assumed to be zero.  The SALTWATER\_HEAD option can be used to provide the sea level elevation for these applications provided the sea level is constant for the simulation.
+\item If sea level changes during the simulation, then the TVA6 input option should be used to provide sea level elevation for each stress period.
+
+\end{itemize}
+
+\vspace{5mm}
+\subsubsection{Structure of Blocks}
+
+\vspace{5mm}
+\noindent \textit{FOR EACH SIMULATION}
+\lstinputlisting[style=blockdefinition]{./mf6ivar/tex/gwf-swi-options.dat}
+%\lstinputlisting[style=blockdefinition]{./mf6ivar/tex/gwf-swi-griddata.dat}
+%\vspace{5mm}
+%\noindent \textit{FOR ANY STRESS PERIOD}
+%\lstinputlisting[style=blockdefinition]{./mf6ivar/tex/gwf-buy-period.dat}
+
+\vspace{5mm}
+\subsubsection{Explanation of Variables}
+\begin{description}
+\input{./mf6ivar/tex/gwf-swi-desc.tex}
+\end{description}
+
+\vspace{5mm}
+\subsubsection{Example Input File}
+\lstinputlisting[style=inputfile]{./mf6ivar/examples/gwf-swi-example.dat}
+

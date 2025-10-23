@@ -1,0 +1,21 @@
+# --------------------- exg swiswi options ---------------------
+# flopy multi-package
+
+block options
+name print_input
+type keyword
+reader urword
+optional true
+longname keyword to print input to list file
+description keyword to indicate that the list of exchange entries will be echoed to the listing file immediately after it is read.
+mf6internal ipr_input
+
+block options
+name print_flows
+type keyword
+reader urword
+optional true
+longname keyword to print swiswi flows to list file
+description keyword to indicate that the list of exchange flow rates will be printed to the listing file for every stress period in which ``SAVE BUDGET'' is specified in Output Control.
+mf6internal ipr_flow
+

@@ -29,6 +29,7 @@ module IdmGwfDfnSelectorModule
   use GwfRivInputModule
   use GwfRivgInputModule
   use GwfStoInputModule
+  use GwfSwiInputModule
   use GwfVscInputModule
   use GwfWelInputModule
   use GwfWelgInputModule
@@ -115,6 +116,8 @@ contains
       call set_param_pointer(input_definition, gwf_rivg_param_definitions)
     case ('STO')
       call set_param_pointer(input_definition, gwf_sto_param_definitions)
+    case ('SWI')
+      call set_param_pointer(input_definition, gwf_swi_param_definitions)
     case ('VSC')
       call set_param_pointer(input_definition, gwf_vsc_param_definitions)
     case ('WEL')
@@ -179,6 +182,8 @@ contains
       call set_param_pointer(input_definition, gwf_rivg_aggregate_definitions)
     case ('STO')
       call set_param_pointer(input_definition, gwf_sto_aggregate_definitions)
+    case ('SWI')
+      call set_param_pointer(input_definition, gwf_swi_aggregate_definitions)
     case ('VSC')
       call set_param_pointer(input_definition, gwf_vsc_aggregate_definitions)
     case ('WEL')
@@ -243,6 +248,8 @@ contains
       call set_block_pointer(input_definition, gwf_rivg_block_definitions)
     case ('STO')
       call set_block_pointer(input_definition, gwf_sto_block_definitions)
+    case ('SWI')
+      call set_block_pointer(input_definition, gwf_swi_block_definitions)
     case ('VSC')
       call set_block_pointer(input_definition, gwf_vsc_block_definitions)
     case ('WEL')
@@ -306,6 +313,8 @@ contains
       multi_package = gwf_rivg_multi_package
     case ('STO')
       multi_package = gwf_sto_multi_package
+    case ('SWI')
+      multi_package = gwf_swi_multi_package
     case ('VSC')
       multi_package = gwf_vsc_multi_package
     case ('WEL')
@@ -372,6 +381,8 @@ contains
       call set_subpkg_pointer(subpackages, gwf_rivg_subpackages)
     case ('STO')
       call set_subpkg_pointer(subpackages, gwf_sto_subpackages)
+    case ('SWI')
+      call set_subpkg_pointer(subpackages, gwf_swi_subpackages)
     case ('VSC')
       call set_subpkg_pointer(subpackages, gwf_vsc_subpackages)
     case ('WEL')
@@ -435,6 +446,8 @@ contains
     case ('RIVG')
       integrated = .true.
     case ('STO')
+      integrated = .true.
+    case ('SWI')
       integrated = .true.
     case ('VSC')
       integrated = .true.

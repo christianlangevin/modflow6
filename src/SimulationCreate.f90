@@ -363,6 +363,7 @@ contains
     use GwtGwtExchangeModule, only: gwtexchange_create
     use GweGweExchangeModule, only: gweexchange_create
     use OlfGwfExchangeModule, only: olfgwf_cr
+    use SwiSwiExchangeModule, only: swiswi_cr
     use VirtualGwfExchangeModule, only: add_virtual_gwf_exchange
     use VirtualGwtExchangeModule, only: add_virtual_gwt_exchange
     use VirtualGweExchangeModule, only: add_virtual_gwe_exchange
@@ -486,6 +487,11 @@ contains
         write (exg_name, '(a,i0)') 'OLF-GWF_', exg_id
         if (both_local) then
           call olfgwf_cr(fname, exg_name, exg_id, m1_id, m2_id, exg_mempath)
+        end if
+      case ('SWI6-SWI6')
+        write (exg_name, '(a,i0)') 'SWI-SWI_', exg_id
+        if (both_local) then
+          call swiswi_cr(fname, exg_name, exg_id, m1_id, m2_id, exg_mempath)
         end if
       case default
         write (errmsg, '(a,a)') &

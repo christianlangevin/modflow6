@@ -24,6 +24,7 @@ gwf-rcha.dfn
 gwf-riv.dfn
 gwf-rivg.dfn
 gwf-sto.dfn
+gwf-swi.dfn
 gwf-vsc.dfn
 gwf-wel.dfn
 gwf-welg.dfn
@@ -111,5 +112,6 @@ exg-gwfgwe.dfn
 exg-gwegwe.dfn
 exg-gwfprt.dfn
 exg-olfgwf.dfn
+exg-swiswi.dfn
 utl-hpc.dfn
 utl-ncf.dfn

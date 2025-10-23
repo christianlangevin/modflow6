@@ -1,0 +1,29 @@
+BEGIN options
+  auxiliary  saltwater_head  myauxvar
+END options
+
+BEGIN period  1
+  saltwater_head
+    CONSTANT       0.00000000
+  myauxvar
+    INTERNAL  FACTOR  1.0
+           1.0       1.0       1.0       
+           1.0       1.0       1.0       
+           1.0       1.0       1.0       
+           1.0       1.0       1.0       
+           1.0       1.0       1.0       
+           1.0       1.0       1.0
+END period  1
+
+BEGIN period  3
+  saltwater_head
+    CONSTANT       0.5
+  myauxvar
+    INTERNAL  FACTOR  1.0
+           1.0       1.0       1.0       
+           1.0       1.0       1.0       
+           1.0       1.0       1.0       
+           1.0       1.0       1.0       
+           1.0       1.0       1.0       
+           1.0       1.0       1.0
+END period  3

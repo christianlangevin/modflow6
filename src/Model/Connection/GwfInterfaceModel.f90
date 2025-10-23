@@ -155,6 +155,7 @@ contains
     call mem_deallocate(this%ingnc)
     call mem_deallocate(this%iss)
     call mem_deallocate(this%inewtonur)
+    call mem_deallocate(this%inswi)
     !
     ! -- NumericalModelType
     call this%NumericalModelType%model_da()

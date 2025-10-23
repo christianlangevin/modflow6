@@ -1,0 +1,5 @@
+BEGIN OPTIONS
+  [ZETA FILEOUT <zetafile>]
+  [TVA6 FILEIN <tva6_filename>]
+  [SALTWATER_HEAD <saltwater_head>]
+END OPTIONS
