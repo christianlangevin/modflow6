@@ -26,7 +26,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v6
         with:
-          repository: christianlangevin/modflow6-nightly-build
+          repository: MODFLOW-ORG/modflow6-nightly-build
 
       - name: Checkout modflow6
         uses: actions/checkout@v6
