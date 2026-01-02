@@ -1,0 +1,60 @@
+name: MODFLOW 6 SWI nightly build
+# Only allow one development build to run at once.
+# If a new build is triggered, the previous build
+# is cancelled. This allows modflow6 CI to trigger
+# the development build when merging into develop,
+# guaranteeing that the development distribution
+# always consists of the latest state of develop.
+concurrency: 
+  group: dev-dist
+  cancel-in-progress: true
+on:
+  # workflow_dispatch trigger to start release via GitHub UI or CLI,
+  # see https://docs.github.com/en/actions/managing-workflow-runs/manually-running-a-workflow
+  workflow_dispatch:
+jobs:
+  get_version:
+    name: Get current version
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash -l {0}
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+
+      - name: Checkout repo
+        uses: actions/checkout@v6
+        with:
+          repository: christianlangevin/modflow6-nightly-build
+
+      - name: Checkout modflow6
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ github.repository_owner }}/modflow6
+          path: modflow6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - name: Install Python packages
+        run: pip install -r requirements.txt
+      
+      - name: Get version
+        working-directory: modflow6/distribution
+        id: get_version
+        run: |
+          ver=$(python update_version.py -g)
+          echo "version=${ver}" >> "$GITHUB_OUTPUT"
+
+  make_dist:
+    name: Make developmode distribution
+    needs: get_version
+    uses: christianlangevin/modflow6/.github/workflows/release.yml@develop
+    with:
+      branch: feat-swi-correction2
+      releasemode: false
+      run_tests: true
+      version: ${{ needs.get_version.outputs.version }}
