@@ -477,16 +477,17 @@ contains
         if (inwt /= 0) then
           call SyTerms(tp, bt, rho2, rho2old, snnew, snold, &
                        aterm, rhsterm)
-!
+
           ! add specific yield terms to amat and rhs -
           !subtract out aterm and rhsterm from the saltwater zone for freshwater
-          !
+
           ! THEREFORE, for saltwater, flip sign on aterm and rhsterm
           if (isaltwater .eq. 1) then
             aterm = -aterm
             rhsterm = -rhsterm
           end if
           !-------------------------------------------------------------
+
           idiag = this%dis%con%ia(n)
           call matrix_sln%add_value_pos(idxglo(idiag), -aterm)
           rhs(n) = rhs(n) - rhsterm
@@ -495,7 +496,7 @@ contains
           rho2 = -rho2 * this%alphaf
           rho2old = -rho2old * this%alphaf
           ! add specific yield terms to hcof and rhs -
-          !subtract out terms from the saltwater zone for freshwater
+          ! subtract out terms from the saltwater zone for freshwater
           !
           ! THEREFORE, for saltwater, flip sign on terms
           if (isaltwater .eq. 1) then
