@@ -4,7 +4,6 @@ boundary.
 
 """
 
-
 import flopy
 import pytest
 from framework import TestFramework
