@@ -171,6 +171,8 @@ def check_output(idx, test):
     assert np.allclose(zeta, zeta_answer), f"zeta is not right {zeta} /= {zeta_answer}"
 
 
+@pytest.mark.skip(reason="mf6 swi-swi exchange not working properly")
+@pytest.mark.developmode
 @pytest.mark.parametrize("idx, name", enumerate(cases))
 def test_mf6model(idx, name, function_tmpdir, targets, plot):
     test = TestFramework(

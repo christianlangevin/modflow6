@@ -147,6 +147,7 @@ def check_output(idx, test):
     sim = test.sims[0]
 
 
+@pytest.mark.developmode
 @pytest.mark.parametrize("idx, name", enumerate(cases))
 def test_mf6model(idx, name, function_tmpdir, targets, plot):
     test = TestFramework(
