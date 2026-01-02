@@ -4,10 +4,8 @@ boundary.
 
 """
 
-import pathlib as pl
 
 import flopy
-import numpy as np
 import pytest
 from framework import TestFramework
 
@@ -17,14 +15,14 @@ cases = [
 ]
 saltwater_head = [0.0, 40.0]
 
-Lx = 10000. # x position of right edge of model domain
-delr = 100.
-delc = 1.
+Lx = 10000.0  # x position of right edge of model domain
+delr = 100.0
+delc = 1.0
 nlay = 1
 nrow = 1
 ncol = int(Lx / delr)
-top_island = 50.
-botm_aquifer = -50.
+top_island = 50.0
+botm_aquifer = -50.0
 recharge = 0.0001
 hydraulic_conductivity = 100.0
 ghb_cond_fact = 1.0
@@ -75,7 +73,7 @@ def build_models(idx, test):
     h0 = saltwater_head[idx]
     zeta_file = name + ".zta"
     swi = flopy.mf6.ModflowGwfswi(
-        gwf, 
+        gwf,
         zeta_filerecord=zeta_file,
         saltwater_head=h0,
     )
@@ -120,7 +118,9 @@ def plot_output(idx, test):
     pxs.plot_fill_between(zeta, head=head, colors=colors, ax=ax, edgecolors="none")
 
     pxs.plot_grid()
-    title = f"saltwater head = {saltwater_head[idx]}; Fresh volume = {volume_fresh:0.2f}"
+    title = (
+        f"saltwater head = {saltwater_head[idx]}; Fresh volume = {volume_fresh:0.2f}"
+    )
     ax.set_title(title)
     ax.set_ylim(botm_aquifer, top_island)
     plt.savefig(ws / "zeta.png")

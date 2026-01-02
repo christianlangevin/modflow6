@@ -168,9 +168,7 @@ def check_output(idx, test):
     zeta_answer = -head * 40.0
     for j in range(head.shape[0]):
         print(j, head[j], zeta[j], zeta_answer[j])
-    assert np.allclose(
-        zeta, zeta_answer
-    ), f"zeta is not right {zeta} /= {zeta_answer}"
+    assert np.allclose(zeta, zeta_answer), f"zeta is not right {zeta} /= {zeta_answer}"
 
 
 @pytest.mark.parametrize("idx, name", enumerate(cases))
@@ -184,4 +182,3 @@ def test_mf6model(idx, name, function_tmpdir, targets, plot):
         targets=targets,
     )
     test.run()
-    

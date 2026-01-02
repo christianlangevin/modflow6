@@ -4,8 +4,6 @@ boundary.
 
 """
 
-import pathlib as pl
-
 import flopy
 import numpy as np
 import pytest
@@ -17,27 +15,28 @@ cases = [
 ]
 saltwater_head = [0.0, 1.0]
 
-dmax = -20. # deepest ocean bottom elevation
-dmin = -1. # shallowest ocean bottom elevation
-Lx_coast = 3000. # x position of coastline from the left
-Lx_edge = 10000. # x position of right edge of model domain
-delr = 100.
-delc = 1.
+dmax = -20.0  # deepest ocean bottom elevation
+dmin = -1.0  # shallowest ocean bottom elevation
+Lx_coast = 3000.0  # x position of coastline from the left
+Lx_edge = 10000.0  # x position of right edge of model domain
+delr = 100.0
+delc = 1.0
 nlay = 1
 nrow = 1
 ncol = int(Lx_edge / delr)
-top_island = 10.
-botm_aquifer = -200.
+top_island = 10.0
+botm_aquifer = -200.0
 recharge = 0.001
 hydraulic_conductivity = 100.0
 ghb_cond_fact = 0.001
 
-dx = Lx_edge / ncol 
-x = np.linspace(dx / 2., Lx_edge - dx / 2, ncol)
+dx = Lx_edge / ncol
+x = np.linspace(dx / 2.0, Lx_edge - dx / 2, ncol)
 slope = (dmin - dmax) / Lx_coast
 top = dmax + x * slope
-top[x>Lx_coast] = top_island
+top[x > Lx_coast] = top_island
 top = top.reshape((nrow, ncol))
+
 
 def build_models(idx, test):
     ws = test.workspace
@@ -84,7 +83,7 @@ def build_models(idx, test):
     h0 = saltwater_head[idx]
     zeta_file = name + ".zta"
     swi = flopy.mf6.ModflowGwfswi(
-        gwf, 
+        gwf,
         zeta_filerecord=zeta_file,
         saltwater_head=h0,
     )
@@ -126,8 +125,11 @@ def plot_output(idx, test):
     ax = pxs.ax
 
     import matplotlib.patches
+
     h0 = saltwater_head[idx]
-    rect = matplotlib.patches.Rectangle((0, botm_aquifer), Lx_edge, h0 - botm_aquifer, fc="red")
+    rect = matplotlib.patches.Rectangle(
+        (0, botm_aquifer), Lx_edge, h0 - botm_aquifer, fc="red"
+    )
     ax.add_patch(rect)
 
     colors = ["cyan", "red"]

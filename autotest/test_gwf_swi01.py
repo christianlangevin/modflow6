@@ -148,9 +148,7 @@ def get_heads_for_comparison(sim, idx):
     xoffset = Lx / 2 + delr / 2
     xanalytical = xc[jstart:] - xoffset
     if idx == 0:
-        hanalytical = analytical_head_confined(
-            xanalytical, recharge, Lx / 2.0, hk, 40
-        )
+        hanalytical = analytical_head_confined(xanalytical, recharge, Lx / 2.0, hk, 40)
     else:
         hanalytical = analytical_head_unconfined(
             xanalytical, recharge, Lx / 2.0, hk, 40
@@ -196,17 +194,20 @@ def check_output(idx, test):
 
     if idx in [0, 1]:
         atol = 0.003
-        assert np.allclose(
-            diff[:-1], 0, atol=atol
-        ), f"Difference between model and analytical solution {diff} greater than atol {atol}"
+        assert np.allclose(diff[:-1], 0, atol=atol), (
+            f"Difference between model and analytical solution {diff} "
+            f"greater than atol {atol}"
+        )
     elif idx == 2:
         # newton
-        assert np.all(
-            diff[:-1] < 0.0
-        ), f"Difference between model and analytical solution {diff} should be less than zero for newton"
-        assert np.all(
-            diff[:-1] > -0.5
-        ), f"Difference between model and analytical solution {diff} should be greater than tol for newton"
+        assert np.all(diff[:-1] < 0.0), (
+            f"Difference between model and analytical solution {diff} "
+            "should be less than zero for newton"
+        )
+        assert np.all(diff[:-1] > -0.5), (
+            f"Difference between model and analytical solution {diff} "
+            "should be greater than tol for newton"
+        )
 
 
 @pytest.mark.parametrize("idx, name", enumerate(cases))

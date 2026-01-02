@@ -85,12 +85,9 @@ def build_models(idx, test):
         icelltype=icelltype[idx],
         k=k,
     )
-    sto = flopy.mf6.ModflowGwfsto(
-        gwf, iconvert=iconvert[idx], ss=1.0e-5, sy=0.2
-    )
+    sto = flopy.mf6.ModflowGwfsto(gwf, iconvert=iconvert[idx], ss=1.0e-5, sy=0.2)
     zeta_file = name + ".zta"
-    swi = flopy.mf6.ModflowGwfswi(
-        gwf, zeta_filerecord=zeta_file)
+    swi = flopy.mf6.ModflowGwfswi(gwf, zeta_filerecord=zeta_file)
     cghb = 1.0 * delr * delc / 10.0
     ghb = flopy.mf6.ModflowGwfghb(
         gwf,
@@ -148,9 +145,7 @@ def check_output(idx, test):
     zeta_answer = -head * 40.0
     for j in range(head.shape[0]):
         print(j, head[j], zeta[j], zeta_answer[j])
-    assert np.allclose(
-        zeta, zeta_answer
-    ), f"zeta is not right {zeta} /= {zeta_answer}"
+    assert np.allclose(zeta, zeta_answer), f"zeta is not right {zeta} /= {zeta_answer}"
 
 
 @pytest.mark.parametrize("idx, name", enumerate(cases))

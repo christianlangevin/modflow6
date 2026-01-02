@@ -118,7 +118,7 @@ contains
 
     ! set dimensions
     this%isize = isize
-    
+
     ! allocate arrays
     call this%allocate_arrays()
 
@@ -260,7 +260,7 @@ contains
     integer(I4B) :: j
 
     ! allocate arrays
-    allocate(this%variables(this%nvar))
+    allocate (this%variables(this%nvar))
     do i = 1, this%nvar
       call mem_allocate(this%variables(i)%dblvec, this%isize, &
                         this%auxname(i), this%memoryPath)
@@ -450,7 +450,7 @@ contains
         end if
 
       else
-        call store_error('Looking for variable name ' // trim(keyword) // &
+        call store_error('Looking for variable name '//trim(keyword)// &
                          &'Found: '//trim(line))
         call this%parser%StoreErrorUnit()
       end if
@@ -485,7 +485,7 @@ contains
     do i = 1, this%nvar
       call mem_deallocate(this%variables(i)%dblvec)
     end do
-    deallocate(this%variables)
+    deallocate (this%variables)
     !
     ! deallocate scalars in memory manager
     call mem_deallocate(this%inunit)

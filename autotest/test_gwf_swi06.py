@@ -4,7 +4,6 @@ boundary.
 
 """
 
-import pathlib as pl
 
 import flopy
 import numpy as np
@@ -15,22 +14,22 @@ cases = [
     "swi06a",
 ]
 
-Lx = 10000. # x position of right edge of model domain
-delr = 100.
-delc = 1.
+Lx = 10000.0  # x position of right edge of model domain
+delr = 100.0
+delc = 1.0
 nlay = 1
 nrow = 1
 ncol = int(Lx / delr)
-top_island = 50.
-botm_aquifer = -50.
+top_island = 50.0
+botm_aquifer = -50.0
 recharge = 0.0001
 hydraulic_conductivity = 100.0
 ghb_cond_fact = 1.0
-perlen = 10 * 365.
+perlen = 10 * 365.0
 nper = 10
 perioddata = nper * [(perlen, 1, 1.0)]
-sealevel_start = 0.
-sealevel_stop = 40.
+sealevel_start = 0.0
+sealevel_stop = 40.0
 
 
 def build_models(idx, test):
@@ -77,7 +76,7 @@ def build_models(idx, test):
     )
     zeta_file = name + ".zta"
     swi = flopy.mf6.ModflowGwfswi(
-        gwf, 
+        gwf,
         zeta_filerecord=zeta_file,
         tva6_filerecord=f"{name}.swi.tva",
     )
@@ -137,7 +136,7 @@ def plot_output(idx, test):
         pxs.plot_surface(zeta)
 
     pxs.plot_grid()
-    title = f"Rising Sea Level"
+    title = "Rising Sea Level"
     ax.set_title(title)
     ax.set_ylim(botm_aquifer, top_island)
     plt.savefig(ws / "zeta.png")
