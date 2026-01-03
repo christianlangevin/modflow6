@@ -196,6 +196,7 @@ $(OBJDIR)/gwt-advidm.o \
 $(OBJDIR)/gwf-welidm.o \
 $(OBJDIR)/gwf-welgidm.o \
 $(OBJDIR)/gwf-vscidm.o \
+$(OBJDIR)/gwf-swiidm.o \
 $(OBJDIR)/gwf-stoidm.o \
 $(OBJDIR)/gwf-rividm.o \
 $(OBJDIR)/gwf-rivgidm.o \
@@ -233,6 +234,7 @@ $(OBJDIR)/gwe-disidm.o \
 $(OBJDIR)/gwe-ctpidm.o \
 $(OBJDIR)/gwe-cndidm.o \
 $(OBJDIR)/gwe-advidm.o \
+$(OBJDIR)/exg-swiswiidm.o \
 $(OBJDIR)/exg-olfgwfidm.o \
 $(OBJDIR)/exg-gwtgwtidm.o \
 $(OBJDIR)/exg-gwfprtidm.o \
@@ -384,6 +386,7 @@ $(OBJDIR)/IsothermEnum.o \
 $(OBJDIR)/FreundlichIsotherm.o \
 $(OBJDIR)/Xt3dAlgorithm.o \
 $(OBJDIR)/TvBase.o \
+$(OBJDIR)/Xt3dAlgorithm.o \
 $(OBJDIR)/gwf-sfr.o \
 $(OBJDIR)/gwf-riv.o \
 $(OBJDIR)/gwf-maw.o \
@@ -442,12 +445,12 @@ $(OBJDIR)/gwf-uzf.o \
 $(OBJDIR)/tsp-apt.o \
 $(OBJDIR)/gwt-mst.o \
 $(OBJDIR)/GwtDspOptions.o \
-$(OBJDIR)/gwf-tvs.o \
-$(OBJDIR)/GwfStorageUtils.o \
+$(OBJDIR)/UtlTva.o \
+$(OBJDIR)/gwf-sto.o \
+$(OBJDIR)/gwf-npf.o \
 $(OBJDIR)/Mover.o \
 $(OBJDIR)/GwfMvrPeriodData.o \
 $(OBJDIR)/ImsLinearMisc.o \
-$(OBJDIR)/gwf-npf.o \
 $(OBJDIR)/GwfBuyInputData.o \
 $(OBJDIR)/GweCndOptions.o \
 $(OBJDIR)/VirtualBase.o \
@@ -469,7 +472,7 @@ $(OBJDIR)/gwt-dsp.o \
 $(OBJDIR)/gwt-cnc.o \
 $(OBJDIR)/gwf-wel.o \
 $(OBJDIR)/gwf-rch.o \
-$(OBJDIR)/gwf-sto.o \
+$(OBJDIR)/gwf-swi.o \
 $(OBJDIR)/gwf-oc.o \
 $(OBJDIR)/gwf-obs.o \
 $(OBJDIR)/gwf-mvr.o \
@@ -496,7 +499,6 @@ $(OBJDIR)/gwt.o \
 $(OBJDIR)/gwf.o \
 $(OBJDIR)/gwe.o \
 $(OBJDIR)/chf.o \
-$(OBJDIR)/ArrayReaderBase.o \
 $(OBJDIR)/VirtualModel.o \
 $(OBJDIR)/BaseExchange.o \
 $(OBJDIR)/InterfaceMap.o \
@@ -513,13 +515,11 @@ $(OBJDIR)/LinearSolverBase.o \
 $(OBJDIR)/ImsReordering.o \
 $(OBJDIR)/StructVector.o \
 $(OBJDIR)/ModflowInput.o \
-$(OBJDIR)/IdmLogger.o \
 $(OBJDIR)/NCFileVars.o \
 $(OBJDIR)/ModelPackageInputs.o \
 $(OBJDIR)/DefinitionSelect.o \
 $(OBJDIR)/Integer1dReader.o \
 $(OBJDIR)/Double2dReader.o \
-$(OBJDIR)/Double1dReader.o \
 $(OBJDIR)/VirtualExchange.o \
 $(OBJDIR)/GridSorting.o \
 $(OBJDIR)/DisConnExchange.o \
@@ -575,6 +575,7 @@ $(OBJDIR)/VirtualGwtExchange.o \
 $(OBJDIR)/VirtualGwfExchange.o \
 $(OBJDIR)/VirtualGweModel.o \
 $(OBJDIR)/VirtualGweExchange.o \
+$(OBJDIR)/exg-swiswi.o \
 $(OBJDIR)/SolutionGroup.o \
 $(OBJDIR)/SolutionFactory.o \
 $(OBJDIR)/exg-olfgwf.o \
