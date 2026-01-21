@@ -7,7 +7,7 @@
 module SwiSwiExchangeModule
 
   use KindModule, only: DP, I4B, LGP
-  use ConstantsModule, only: DZERO, LINELENGTH
+  use ConstantsModule, only: DZERO, LINELENGTH, DONE
   use SimModule, only: count_errors, store_error, store_error_filename, &
                        store_error_unit
   use SimVariablesModule, only: errmsg, model_loc_idx
@@ -18,6 +18,8 @@ module SwiSwiExchangeModule
   use NumericalExchangeModule, only: NumericalExchangeType
   use GwfModule, only: GwfModelType
   use MatrixBaseModule
+  use SmoothingModule, only: sQuadraticSaturation, &
+                             sQuadraticSaturationDerivative
 
   implicit none
 
@@ -58,6 +60,7 @@ module SwiSwiExchangeModule
     procedure :: exg_ad => swi_swi_ad
     procedure :: exg_cf => swi_swi_cf
     procedure :: exg_fc => swi_swi_fc
+    procedure :: swi_cross_storage
     ! procedure :: exg_fn => swi_swi_fn
     ! ! procedure :: exg_cq => swi_swi_cq
     ! ! procedure :: exg_bd => swi_swi_bd
@@ -335,7 +338,10 @@ contains
     integer(I4B), optional, intent(in) :: inwtflag
     ! local
     integer(I4B) :: n, iglo, jglo
-    real(DP) :: term
+    real(DP) :: termf
+    real(DP) :: terms
+    real(DP) :: rtermf
+    real(DP) :: rterms
 
     ! -- TODO: Since these terms are all Newton, do they go on the
     !    here in _fc or should we put in _fn
@@ -343,20 +349,29 @@ contains
     !     storage term for the freshwater model has a saltwater model
     !     dependency and vice versa.
 
+    ! If steady steady, then skip out
+    if (this%gwf_fresh%iss == 1) return
+
     ! -- Put terms into amatsln and rhs
     do n = 1, this%nexg
 
       iglo = n + this%gwf_fresh%moffset
       jglo = n + this%gwf_salt%moffset
-      term = DZERO ! todo: need to calculate this term
+      termf = DZERO
+      rtermf = DZERO
+      terms = DZERO
+      rterms = DZERO
+
+      ! call routine to calculate cross storage terms
+      call this%swi_cross_storage(n, termf, rtermf, terms, rterms)
 
       ! fill off-diagonal matrix coefficient
-      call matrix_sln%set_value_pos(this%idxglo(n), term)
-      call matrix_sln%set_value_pos(this%idxsymglo(n), term)
+      call matrix_sln%set_value_pos(this%idxglo(n), termf)
+      call matrix_sln%set_value_pos(this%idxsymglo(n), terms)
 
-      ! fill diagonal position for fresh model and salt model nodes
-      call matrix_sln%add_diag_value(iglo, -term)
-      call matrix_sln%add_diag_value(jglo, -term)
+      ! update rhs for fresh model and salt model nodes
+      rhs_sln(iglo) = rhs_sln(iglo) + rtermf
+      rhs_sln(jglo) = rhs_sln(jglo) + rterms
     end do
     ! !
     ! ! -- Set inwt to exchange newton, but shut off if requested by caller
@@ -371,6 +386,93 @@ contains
     ! -- Return
     return
   end subroutine swi_swi_fc
+
+  subroutine swi_cross_storage(this, n, termf, rtermf, terms, rterms)
+    ! modules
+    use TdisModule, only: delt
+    use GwfStorageUtilsModule, only: SsCapacity, SyCapacity, SsTerms, SyTerms
+    !
+    class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
+    ! dummy variables
+    integer(I4B), intent(in) :: n
+    real(DP), intent(out) :: termf
+    real(DP), intent(out) :: rtermf
+    real(DP), intent(out) :: terms
+    real(DP), intent(out) :: rterms
+    ! local variables
+    real(DP) :: tled
+    real(DP) :: sc2
+    real(DP) :: rho2
+    real(DP) :: tp
+    real(DP) :: bt
+    real(DP) :: tthk
+    real(DP) :: hf, hs
+    real(DP) :: snnewf, snnews
+    real(DP) :: zetanew
+    real(DP) :: zetaold
+    real(DP) :: dssdhf
+    real(DP) :: dsfdhs
+
+    ! set variables
+    tled = DONE / delt
+
+    if (this%gwf_fresh%ibound(n) <= 0) return
+
+    ! calculate zetanew and zetaold
+    zetanew = this%gwf_fresh%swi%get_zetanew(n)
+    zetaold = this%gwf_fresh%swi%get_zetaold(n)
+
+    ! aquifer elevations and thickness
+    tp = this%gwf_fresh%dis%top(n)
+    bt = this%gwf_fresh%dis%bot(n)
+    tthk = tp - bt
+    hf = this%gwf_fresh%x(n)
+    hs = this%gwf_salt%x(n)
+
+    ! aquifer freshwater and saltwater saturations
+    snnews = sQuadraticSaturation(tp, bt, zetanew)
+    snnewf = DONE - snnews
+
+    ! storage coefficients
+    sc2 = SyCapacity(this%gwf_fresh%dis%area(n), this%gwf_fresh%sto%sy(n))
+    rho2 = sc2 * tled
+
+    !
+    ! calculate newton terms for specific yield
+    !
+    ! calculate saturation derivative as dS/dzeta * dzeta/dh_fresh
+    !    derv = sQuadraticSaturationDerivative(tp, bt, zetanew)
+    !    derv = derv * dssdh
+    ! -----------------------------------------------------
+    ! calculate cross-saturation derivative parts directly as dSf / dhs and dSs / dhf
+    !  dereps = 1e-6
+    ! for dSf / dhs
+    !  zetanew = this%gwf_fresh%swi%get_zetanew(n, eps_salt=dereps)
+    !  dsaltsat = sQuadraticSaturation(tp, bt, zetanew, this%gwf_fresh%sto%satomega)
+    !  dfreshsat = DONE - dsaltsat
+    !  dsfdhs = (dfreshsat - snnewf) / dereps
+    !
+    ! for dSs / dhf
+    !  zetanew = this%gwf_fresh%swi%get_zetanew(n, eps_fresh=dereps)
+    !  dsaltsat = sQuadraticSaturation(tp, bt, zetanew, this%gwf_fresh%sto%satomega)
+    !  dssdhf = (dsaltsat - snnews) / dereps
+    ! ----------------------------------------------------
+    ! calculate saturation derivative for saltwater as rhof/(rhos-rhof)/TOTTHICK and freshwater as rhos/(rhos-rhof)/TOTTHICK
+    dsfdhs = -this%gwf_fresh%swi%alphas / tthk
+    dssdhf = -this%gwf_fresh%swi%alphaf / tthk
+
+    !   dsfdhs = -0.5125
+    !   dssdhf = -0.5
+    ! ----------------------------------------------------
+    !
+    ! newton cross terms for specific yield
+    termf = -rho2 * tthk * dsfdhs
+    rtermf = termf * hs
+
+    terms = -rho2 * tthk * dssdhf
+    rterms = terms * hf
+
+  end subroutine swi_cross_storage
 
   ! !> @ brief Fill Newton
   ! !!

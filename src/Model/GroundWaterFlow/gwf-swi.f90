@@ -443,7 +443,7 @@ contains
       ! subtract out aterm and rhsterm from the saltwater zone for freshwater
       !
       ! THEREFORE, for saltwater, flip sign on aterm and rhsterm
-      if (isaltwater .eq. 1) then
+      if (isaltwater == 1) then
         aterm = -aterm
         rhsterm = -rhsterm
       end if
@@ -482,7 +482,7 @@ contains
           !subtract out aterm and rhsterm from the saltwater zone for freshwater
 
           ! THEREFORE, for saltwater, flip sign on aterm and rhsterm
-          if (isaltwater .eq. 1) then
+          if (isaltwater == 1) then
             aterm = -aterm
             rhsterm = -rhsterm
           end if
@@ -499,7 +499,7 @@ contains
           ! subtract out terms from the saltwater zone for freshwater
           !
           ! THEREFORE, for saltwater, flip sign on terms
-          if (isaltwater .eq. 1) then
+          if (isaltwater == 1) then
             rho2 = -rho2
             rho2old = -rho2old
           end if
@@ -803,7 +803,7 @@ contains
                        this%zeta)
         !
         ! For saltwater equation, flip sign on rate to just add it
-        if (this%isaltwater .eq. 1) qnm = -qnm
+        if (this%isaltwater == 1) qnm = -qnm
         !
         !       change sign to subtract out qnm from salt side
         flowja(ii) = flowja(ii) - qnm
@@ -822,7 +822,7 @@ contains
       do n = 1, this%dis%nodes
         if (this%ibound(n) <= 0) cycle
         !----saltwater array was not initialized as sto_cq is skipped
-        if (this%isaltwater .eq. 1) then
+        if (this%isaltwater == 1) then
           sto%strgss(n) = 0.0
           sto%strgsy(n) = 0.0
         end if
@@ -869,7 +869,7 @@ contains
         rate = snnew * rate
         !
         ! For saltwater equation, flip sign on rate to just add it
-        if (this%isaltwater .eq. 1) rate = -rate
+        if (this%isaltwater == 1) rate = -rate
         !
         ! subtract rate in saltwater part from total
         sto%strgss(n) = sto%strgss(n) - rate
@@ -907,7 +907,7 @@ contains
           end if
           !
           ! For saltwater equation, flip sign on rate to just add it
-          if (this%isaltwater .eq. 1) rate = -rate
+          if (this%isaltwater == 1) rate = -rate
           !
           ! subtract rate in saltwater part from total
           sto%strgsy(n) = sto%strgsy(n) - rate
@@ -921,7 +921,7 @@ contains
           rate = this%hcof(n) * hnew(n) - this%rhs(n)
           !
           ! For saltwater equation, flip sign on rate to just add it
-          if (this%isaltwater .eq. 1) rate = -rate
+          if (this%isaltwater == 1) rate = -rate
           !
           this%storage(n) = rate
           !
@@ -1584,7 +1584,7 @@ contains
         ! subtract the flow from the saltwater zone for freshwater
         !
         ! THEREFORE, for saltwater, flip sign on cond
-        if (isaltwater .eq. 1) cond = -cond
+        if (isaltwater == 1) cond = -cond
         !
         idiag = npf%dis%con%ia(n)
         call matrix_sln%add_value_pos(idxglo(ii), -cond)

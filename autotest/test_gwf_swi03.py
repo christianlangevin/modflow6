@@ -25,10 +25,11 @@ recharge = 0.001
 k = 10.0
 h0 = 0.0
 h1 = h0
-icelltype = 0
-iconvert = 0
+icelltype = 1
+iconvert = 1
 top = 0.0
-newtonoptions = False
+newtonoptions = True
+storage = False
 
 
 def build_gwf_model(sim, is_saltwater):
@@ -61,7 +62,8 @@ def build_gwf_model(sim, is_saltwater):
         icelltype=icelltype,
         k=k,
     )
-    sto = flopy.mf6.ModflowGwfsto(gwf, iconvert=iconvert, ss=1.0e-5, sy=0.2)
+    if storage:
+        sto = flopy.mf6.ModflowGwfsto(gwf, iconvert=iconvert, ss=1.0e-5, sy=0.2)
     zeta_file = name + ".zta"
     swi = flopy.mf6.ModflowGwfswi(
         gwf,
@@ -101,7 +103,10 @@ def build_models(idx, test):
 
     # transient tdis
     nper = 1
-    nstp = 10
+    if storage:
+        nstp = 10
+    else:
+        nstp = 1
     perlen = 100000.0
     perioddata = nper * [(perlen, nstp, 1.0)]
     tdis = flopy.mf6.ModflowTdis(sim, perioddata=perioddata)
@@ -158,20 +163,32 @@ def check_output(idx, test):
     # get the flopy sim object
     sim = test.sims[0]
 
+    # fresh gwf model
     ws = pl.Path(sim.sim_path)
-    gwf = sim.gwf[0]
-    x = gwf.modelgrid.xcellcenters.flatten()
-    fpth = pl.Path(ws) / f"{gwf.name}.zta"
-    head = gwf.output.head().get_data().flatten()
+    gwf_fresh = sim.gwf[0]
+    x = gwf_fresh.modelgrid.xcellcenters.flatten()
+    fpth = pl.Path(ws) / f"{gwf_fresh.name}.zta"
+    head = gwf_fresh.output.head().get_data().flatten()
     zeta = flopy.utils.HeadFile(fpth, text="zeta").get_data().flatten()
+
+    # salt gwf model
+    ws = pl.Path(sim.sim_path)
+    gwf_salt = sim.gwf[1]
+    x = gwf_salt.modelgrid.xcellcenters.flatten()
+    fpth = pl.Path(ws) / f"{gwf_salt.name}.zta"
+    head_s = gwf_salt.output.head().get_data().flatten()
+    zeta_s = flopy.utils.HeadFile(fpth, text="zeta").get_data().flatten()
 
     zeta_answer = -head * 40.0
     for j in range(head.shape[0]):
-        print(j, head[j], zeta[j], zeta_answer[j])
+        print(j, head[j], head_s[j], zeta[j], zeta_s[j], zeta_answer[j])
     assert np.allclose(zeta, zeta_answer), f"zeta is not right {zeta} /= {zeta_answer}"
+    assert np.allclose(zeta, zeta_s), (
+        f"salt zeta not equal fresh zeta {zeta_s} /= {zeta}"
+    )
+    assert np.allclose(head_s, 0), f"salt head is not zero {head_s}"
 
 
-@pytest.mark.skip(reason="mf6 swi-swi exchange not working properly")
 @pytest.mark.developmode
 @pytest.mark.parametrize("idx, name", enumerate(cases))
 def test_mf6model(idx, name, function_tmpdir, targets, plot):
