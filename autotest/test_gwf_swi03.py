@@ -58,7 +58,7 @@ def build_gwf_model(sim, is_saltwater):
     npf = flopy.mf6.ModflowGwfnpf(
         gwf,
         save_specific_discharge=True,
-        alternative_cell_averaging="harmonic",
+        alternative_cell_averaging=None,
         icelltype=icelltype,
         k=k,
     )

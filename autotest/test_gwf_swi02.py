@@ -81,7 +81,7 @@ def build_models(idx, test):
     npf = flopy.mf6.ModflowGwfnpf(
         gwf,
         save_specific_discharge=True,
-        alternative_cell_averaging="harmonic",
+        alternative_cell_averaging=None,
         icelltype=icelltype[idx],
         k=k,
     )
