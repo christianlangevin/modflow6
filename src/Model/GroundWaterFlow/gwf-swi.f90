@@ -396,9 +396,13 @@ contains
       ! aquifer elevations and thickness
       tp = this%dis%top(n)
       bt = this%dis%bot(n)
-      !
+
       ! aquifer saturation
       if (isaltwater == 0) then
+        ! Freshwater model, freshwater saturation is considered to be 1
+        ! if iconvert == 0, otherwise old and new saturation are calculated
+        ! using the old and new head values.  In this case snnew and snold
+        ! are the total saturated cell fractions.
         if (sto%iconvert(n) == 0) then
           snold = DONE
           snnew = DONE
@@ -407,14 +411,18 @@ contains
           snnew = sQuadraticSaturation(tp, bt, hnew(n), sto%satomega)
         end if
       else
+        ! Saltwater model, calculate old and new saturations using the
+        ! old and new zeta values. In this case snnew and snold
+        ! are the saltwater saturated cell fractions.
         snold = sQuadraticSaturation(tp, bt, zetaold, sto%satomega)
         snnew = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
       end if
-      !
+
       ! storage coefficients
       sc1 = SsCapacity(sto%istor_coef, tp, bt, this%dis%area(n), sto%ss(n))
       rho1 = sc1 * tled
-      !
+
+      ! Handle time-varying storage case
       if (sto%integratechanges /= 0) then
         ! Integration of storage changes (e.g. when using TVS):
         !    separate the old (start of time step) and new (end of time step)
@@ -427,66 +435,80 @@ contains
         !    identical => normal MF6 storage formulation
         rho1old = rho1
       end if
-      !
+
       ! calculate specific storage terms
       call SsTerms(sto%iconvert(n), sto%iorig_ss, sto%iconf_ss, tp, bt, &
                    rho1, rho1old, snnew, snold, hnew(n), hold(n), &
                    aterm, rhsterm)
-      !
+
       ! scale down the saltwater part
+      ! THIS APPEARS TO RECALCULATE THE SALTWATER FRACTION OF THE CELL
+      ! IN SNNEW.  THEN THE HCOF AND RHS TERMS ARE MULTIPLIED BY THIS
+      ! SALTWATER FRACTION.  FOR THE FRESHWATER MODEL, THE COMPRESSIBLE
+      ! STORAGE CHANGE IS SUBTRACTED AS IT IS A CORRECTION.  FOR THE 
+      ! SALTWATER MODEL, WHICH IS NOT TREATED AS A CORRECTION, THE ENTIRE
+      ! COMPRESSIBLE STORAGE CHANGE IS ADDED TO HCOF AND RHS. 
+      ! IS IT OKAY TO USE A FULLY FORWARD-WEIGHTED SNNEW HERE FOR THE
+      ! SALTWATER FRACTION OR SHOULD IT BE TIME AVERAGED?
       snnew = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
       aterm = aterm * snnew
       rhsterm = rhsterm * snnew
 
-      !
       ! add specific storage terms to amat and rhs -
       ! subtract out aterm and rhsterm from the saltwater zone for freshwater
-      !
-      ! THEREFORE, for saltwater, flip sign on aterm and rhsterm
       if (isaltwater == 1) then
+        ! If this is saltwater rmodel, then flip sign on aterm and rhsterm
         aterm = -aterm
         rhsterm = -rhsterm
       end if
       idiag = this%dis%con%ia(n)
       call matrix_sln%add_value_pos(idxglo(idiag), -aterm)
       rhs(n) = rhs(n) - rhsterm
-      !
+
+      ! THIS IS WHERE THERE WAS LIKELY A BUG IN THE IMPLEMENTATION.  HERE WE SEE THAT THE SY
+      ! CONTRIBUTION IS ONLY APPLIED FOR ICONVERT /= 0.  HOWEVER, WE STILL NEEED
+      ! TO APPLY AN SY PART EVEN IF ICONVERT == 0 TO HANDLE FOR STORAGE CHANGES
+      ! RESULTING FROM CHANGE IN THE ZETA ELEVATION.  COMMENTING OUT THIS IF STATEMENT
+      ! SO THAT THE SY CONTRIBUTION IS ALWAYS APPLIED.
       ! specific yield
-      if (sto%iconvert(n) /= 0) then
+      ! cdl -- if (sto%iconvert(n) /= 0) then
         rhsterm = DZERO
+
+        ! calculate the saltwater new and old saturations
         snold = sQuadraticSaturation(tp, bt, zetaold, sto%satomega)
         snnew = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
-        !
+ 
         ! secondary storage coefficient
         sc2 = SyCapacity(this%dis%area(n), this%sy(n))
         rho2 = sc2 * tled
-        !
+ 
         if (sto%integratechanges /= 0) then
           ! Integration of storage changes (e.g. when using TVS):
-          !    separate the old (start of time step) and new (end of time step)
-          !    secondary storage capacities
+          ! separate the old (start of time step) and new (end of time step)
+          ! secondary storage capacities
           sc2old = SyCapacity(this%dis%area(n), this%oldsy(n))
           rho2old = sc2old * tled
         else
           ! No integration of storage changes: old and new values are
-          !    identical => normal MF6 storage formulation
+          ! identical => normal MF6 storage formulation
           rho2old = rho2
         end if
-        !
-        ! calculate specific storage terms from bot to zeta
+
+        ! Calculate specific yield terms from bot to zeta. This will
+        ! represent the change in storage due to change in zeta elevation.
+        ! This storage term needs to occur for both iconvert == 0 and iconvert /= 0
         if (inwt /= 0) then
           call SyTerms(tp, bt, rho2, rho2old, snnew, snold, &
                        aterm, rhsterm)
 
           ! add specific yield terms to amat and rhs -
-          !subtract out aterm and rhsterm from the saltwater zone for freshwater
+          ! subtract out aterm and rhsterm from the saltwater zone for freshwater
 
           ! THEREFORE, for saltwater, flip sign on aterm and rhsterm
           if (isaltwater == 1) then
             aterm = -aterm
             rhsterm = -rhsterm
           end if
-          !-------------------------------------------------------------
 
           idiag = this%dis%con%ia(n)
           call matrix_sln%add_value_pos(idxglo(idiag), -aterm)
@@ -519,7 +541,7 @@ contains
           end if
         end if
         !
-      end if
+      ! cdl -- end if
       !
     end do
     !
@@ -624,7 +646,7 @@ contains
       !
       ! calculate newton terms for specific storage
       !    and specific yield
-      if (sto%iconvert(n) /= 0) then
+      ! cdl -- if (sto%iconvert(n) /= 0) then
         ! ----------------------------------------------------
         ! calculate saturation derivative as dS/dzeta * dzeta/dh_fresh
         !    derv = sQuadraticSaturationDerivative(tp, bt, zetanew)
@@ -678,7 +700,7 @@ contains
             rhs(n) = rhs(n) - (-rterm + drterm * hnew(n) + rho2 * bt)
           end if
         end if
-      end if
+      ! cdl -- end if
     end do
     !
     ! return
@@ -883,7 +905,7 @@ contains
         snold = sQuadraticSaturation(tp, bt, zetaold, sto%satomega)
         snnew = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
         if (sto%inewton /= 0) then
-          if (sto%iconvert(n) /= 0) then
+          ! -- cdl if (sto%iconvert(n) /= 0) then
             !
             ! secondary storage coefficient
             sc2 = SyCapacity(this%dis%area(n), this%sy(n))
@@ -904,13 +926,18 @@ contains
             ! calculate specific yield storage terms and rate
             call SyTerms(tp, bt, rho2, rho2old, snnew, snold, &
                          aterm, rhsterm, rate)
-          end if
+          ! cdl -- end if
           !
           ! For saltwater equation, flip sign on rate to just add it
-          if (this%isaltwater == 1) rate = -rate
+          ! -- cdl: flip the sign for freshwater model instead of saltwater model
+          !cdl if (this%isaltwater == 1) rate = -rate
+          if (this%isaltwater == 0) rate = -rate
           !
           ! subtract rate in saltwater part from total
-          sto%strgsy(n) = sto%strgsy(n) - rate
+          ! - cdl sto%strgsy(n) = sto%strgsy(n) - rate
+          ! -- cdl: instead adding the zeta change storage to strgsy
+          ! -- cdl: add it to the swi storage accumulator
+          this%storage(n) = rate
           !
           ! add storage term to flowja - subtract out saltwater part
           idiag = this%dis%con%ia(n)
