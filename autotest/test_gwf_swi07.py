@@ -32,7 +32,7 @@ top = [0.0, 0.0]
 botm = -100.0
 hydraulic_conductivity = 1.0
 specific_yield = 0.2
-specific_storage = 0.0 # 1.0e-3
+specific_storage = 0.0  # 1.0e-3
 sea_level = 0.0
 h0 = (
     sea_level - top[0]
@@ -200,9 +200,8 @@ def check_output(idx, test):
     assert np.isclose(ghb_flow, -swi_storage_flow.sum()), (
         f"ghb_flow {ghb_flow} != swi_storage_flow {swi_storage_flow.sum()}"
     )
-    assert np.allclose(-head*40, zeta), (
-        f"head {-head*40} != zeta {zeta}"
-    )
+    assert np.allclose(-head * 40, zeta), f"head {-head * 40} != zeta {zeta}"
+
 
 @pytest.mark.developmode
 @pytest.mark.parametrize("idx, name", enumerate(cases))
