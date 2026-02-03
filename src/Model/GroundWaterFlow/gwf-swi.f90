@@ -923,14 +923,22 @@ contains
             rho2old = rho2
           end if
           !
-          ! calculate specific yield storage terms and rate
+          ! Calculate specific yield storage terms and rate.
+          ! For the GWF storage package, rate is a negative value
+          ! if the water table rises.  This convention of a negative
+          ! storage rate for a rising water table balances positive
+          ! inflows.
+          ! Here we are using SyTerms for changes in zeta, which are
+          ! conceptually opposite in sign from water table storage.
+          ! If zeta increases for the freshwater model, then there should
+          ! be a positive SWI storage change.
           call SyTerms(tp, bt, rho2, rho2old, snnew, snold, &
                        aterm, rhsterm, rate)
           ! cdl -- end if
           !
           ! For saltwater equation, flip sign on rate to just add it
           ! -- cdl: flip the sign for freshwater model instead of saltwater model
-          !cdl if (this%isaltwater == 1) rate = -rate
+          ! if (this%isaltwater == 1) rate = -rate
           if (this%isaltwater == 0) rate = -rate
           !
           ! subtract rate in saltwater part from total
@@ -941,7 +949,7 @@ contains
           !
           ! add storage term to flowja - subtract out saltwater part
           idiag = this%dis%con%ia(n)
-          flowja(idiag) = flowja(idiag) - rate
+          flowja(idiag) = flowja(idiag) + rate
           !
         else
           ! Calculate change in freshwater storage for Picard way
