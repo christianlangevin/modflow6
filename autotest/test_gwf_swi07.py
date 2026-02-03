@@ -152,11 +152,11 @@ def plot_output(idx, test):
 
 
 def get_freshwater_volume(delr, delc, specific_yield, top, zeta):
-    volume_fresh = 0.0
+    volume_fresh = []
     for i in range(len(zeta)):
         dz_fresh = top[i] - zeta[i]
-        volume_fresh += dz_fresh
-    return volume_fresh * delr * delc * specific_yield
+        volume_fresh.append(dz_fresh * delr * delc * specific_yield)
+    return np.array(volume_fresh)
 
 
 def check_output(idx, test):
@@ -168,9 +168,12 @@ def check_output(idx, test):
     zeta = gwf.swi.output.zeta().get_data().flatten()
     ghb_flow = gwf.output.budget().get_data(text="GHB")[0]["q"][0]
     swi_storage_flow = gwf.output.budget().get_data(text="STORAGE")[0].flatten()
-    print(f"swi_storage_flow = {swi_storage_flow}")
+    flowjaface = gwf.output.budget().get_data(text="FLOW-JA-FACE")[0].flatten()
     print(f"head = {head}")
     print(f"zeta = {zeta}")
+    print(f"ghb_flow = {ghb_flow}")
+    print(f"swi_storage_flow = {swi_storage_flow}")
+    print(f"flowjaface = {flowjaface}")
 
     # calculate calculate freshwater volumes
     zeta_start = [-40.0 * h for h in strt]
@@ -178,29 +181,41 @@ def check_output(idx, test):
     volume_fresh_start = get_freshwater_volume(
         delr, delc, specific_yield, top, zeta_start
     )
+    print(f"volume_fresh_start = {volume_fresh_start}")
+
     volume_fresh_end = get_freshwater_volume(
         delr, delc, specific_yield, top, zeta.flatten()
     )
-    qout_calc = (volume_fresh_end - volume_fresh_start) / perlen
+    print(f"volume_fresh_end = {volume_fresh_end}")
 
-    qout_calc_alt = zeta.flatten() - np.array(zeta_start)
-    qout_calc_alt = qout_calc_alt.sum() * delr * delc * specific_yield / perlen
-    print(f"qout_calc_alt = {qout_calc_alt}")
+    # Calculate swi storage change from zeta.  SWI storage
+    # should be positive if freshwater volume decreases.
+    q = -(volume_fresh_end - volume_fresh_start) / perlen
+    calc_swi_storage_out = -q[q < 0].sum()
+    calc_swi_storage_in = q[q > 0].sum()
+    print(f"calc swi_storage_in  = {calc_swi_storage_in}")
+    print(f"calc swi_storage_out = {calc_swi_storage_out}")
 
-    print(f"volume_fresh_start = {volume_fresh_start}")
-    print(f"volume_fresh_end   = {volume_fresh_end}")
-    print(f"qout_calc          = {qout_calc}")
-    print(f"ghb_flow           = {ghb_flow}")
-    print(f"qout - ghb_flow    = {qout_calc - ghb_flow}")
-    print(f"swi_storage_flow   = {swi_storage_flow.sum()}")
-    # assert np.isclose(qout, ghb_flow), f"qout {qout} != ghb_flow {ghb_flow}"
-    # assert np.isclose(qout_calc, swi_storage_flow.sum()), (
-    #     f"qout_calc {qout_calc} != swi_storage_flow {swi_storage_flow.sum()}"
-    # )
-    assert np.isclose(ghb_flow, -swi_storage_flow.sum()), (
-        f"ghb_flow {ghb_flow} != swi_storage_flow {swi_storage_flow.sum()}"
+    # swi storage change from binary file
+    q = swi_storage_flow
+    swi_storage_in = q[q > 0].sum()
+    swi_storage_out = -q[q < 0].sum()
+    print(f"swi_storage_in  = {swi_storage_in}")
+    print(f"swi_storage_out = {swi_storage_out}")
+
+    atol = 1.0e-4
+    assert np.isclose(swi_storage_in, calc_swi_storage_in, atol=atol), (
+        f"swi_storage_in {swi_storage_in} != calc_swi_storage_in {calc_swi_storage_in}"
     )
-    assert np.allclose(-head * 40, zeta), f"head {-head * 40} != zeta {zeta}"
+    assert np.isclose(swi_storage_out, calc_swi_storage_out, atol=atol), (
+        f"swi_storage_out {swi_storage_out} != calc_swi_storage_out {calc_swi_storage_out}"
+    )
+    assert abs(flowjaface[0]) < 1.0e-6, f"flowjaface {flowjaface[0]} >= 1.e-6"
+    assert abs(flowjaface[2]) < 1.0e-6, f"flowjaface {flowjaface[2]} >= 1.e-6"
+    assert np.allclose(-head * 40.0, zeta), f"head {-head * 40} != zeta {zeta}"
+    assert np.isclose(ghb_flow, swi_storage_out - swi_storage_in), (
+        f"ghb_flow {ghb_flow} != swi_storage_out {swi_storage_out} - swi_storage_in {swi_storage_in}"
+    )
 
 
 @pytest.mark.developmode
