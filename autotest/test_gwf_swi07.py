@@ -208,13 +208,15 @@ def check_output(idx, test):
         f"swi_storage_in {swi_storage_in} != calc_swi_storage_in {calc_swi_storage_in}"
     )
     assert np.isclose(swi_storage_out, calc_swi_storage_out, atol=atol), (
-        f"swi_storage_out {swi_storage_out} != calc_swi_storage_out {calc_swi_storage_out}"
+        f"swi_storage_out {swi_storage_out} != "
+        f"calc_swi_storage_out {calc_swi_storage_out}"
     )
     assert abs(flowjaface[0]) < 1.0e-6, f"flowjaface {flowjaface[0]} >= 1.e-6"
     assert abs(flowjaface[2]) < 1.0e-6, f"flowjaface {flowjaface[2]} >= 1.e-6"
     assert np.allclose(-head * 40.0, zeta), f"head {-head * 40} != zeta {zeta}"
     assert np.isclose(ghb_flow, swi_storage_out - swi_storage_in), (
-        f"ghb_flow {ghb_flow} != swi_storage_out {swi_storage_out} - swi_storage_in {swi_storage_in}"
+        f"ghb_flow {ghb_flow} != "
+        f"swi_storage_out {swi_storage_out} - swi_storage_in {swi_storage_in}"
     )
 
 
