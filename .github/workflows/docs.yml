@@ -26,7 +26,7 @@ jobs:
       - name: Checkout modflow6
         uses: actions/checkout@v6
 
-      - uses: prefix-dev/setup-pixi@v0.9.3
+      - uses: prefix-dev/setup-pixi@v0.9.4
         with:
           pixi-version: v0.41.4
 
@@ -63,7 +63,7 @@ jobs:
           path: usgslatex
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.9.3
+        uses: prefix-dev/setup-pixi@v0.9.4
         with:
           pixi-version: v0.41.4
           manifest-path: "modflow6/pixi.toml"
@@ -167,7 +167,6 @@ jobs:
           name: rtd-files-for-${{ github.sha }}
           path: |
             modflow6/.build_rtd_docs/dev.rst
-            modflow6/.build_rtd_docs/migration.rst
             modflow6/.build_rtd_docs/index.rst
             modflow6/.build_rtd_docs/mf6io.rst
             modflow6/.build_rtd_docs/_dev/
@@ -185,12 +184,12 @@ jobs:
         with:
           name: mf6io.pdf
           path: |
-            modflow6/mf6io.pdf
-            modflow6/ReleaseNotes.pdf
-            modflow6/zonebudget.pdf
-            modflow6/converter_mf5to6.pdf
-            modflow6/mf6suptechinfo.pdf
-            modflow6/mf6examples.pdf
+            modflow6/distribution/mf6io.pdf
+            modflow6/distribution/ReleaseNotes.pdf
+            modflow6/distribution/zonebudget.pdf
+            modflow6/distribution/converter_mf5to6.pdf
+            modflow6/distribution/mf6suptechinfo.pdf
+            modflow6/distribution/mf6examples.pdf
 
   rtd_trigger:
     name: rtd-trigger
@@ -230,7 +229,7 @@ jobs:
           sudo apt-get install doxygen graphviz
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.9.3
+        uses: prefix-dev/setup-pixi@v0.9.4
         with:
           pixi-version: v0.41.4
 

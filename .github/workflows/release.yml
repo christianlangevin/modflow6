@@ -69,6 +69,11 @@ jobs:
             version: 13
             optimization: 1
             extended: false
+          - os: macos-15-intel
+            compiler: gcc
+            version: 13
+            optimization: 1
+            extended: false
           - os: windows-2022
             compiler: ${{ inputs.compiler_toolchain }}
             version: ${{ inputs.compiler_version }}
@@ -120,7 +125,7 @@ jobs:
           path: modflow6-examples
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.9.3
+        uses: prefix-dev/setup-pixi@v0.9.4
         with:
           pixi-version: v0.41.4
           manifest-path: "modflow6/pixi.toml"
@@ -213,13 +218,18 @@ jobs:
           fi
           echo "filters=$filters" >> $GITHUB_OUTPUT
 
-      # for statically linked gfortran ARM mac build
+      - name: Set GCC_LIBPATH
+        if: runner.os == 'macOS'
+        run: |
+          echo "GCC_LIBPATH=$(brew --prefix)" >> $GITHUB_ENV
+
+      # for statically linked gfortran mac build
       - name: Hide dylibs (macOS)
-        if: matrix.os == 'macos-14'
+        if: runner.os == 'macOS'
         run: |
           version="${{ matrix.version }}"
-          libpath="/opt/homebrew/opt/gcc@$version/lib/gcc/$version"
-          mv $libpath/libgfortran.5.dylib $libpath/libgfortran.5.dylib.bak 
+          libpath="${{ env.GCC_LIBPATH }}/opt/gcc@$version/lib/gcc/$version"
+          mv $libpath/libgfortran.5.dylib $libpath/libgfortran.5.dylib.bak
           mv $libpath/libquadmath.0.dylib $libpath/libquadmath.0.dylib.bak 
 
       - name: Set LDFLAGS (macOS)
@@ -435,7 +445,7 @@ jobs:
         run: sudo ./install.sh --all-users
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.9.3
+        uses: prefix-dev/setup-pixi@v0.9.4
         with:
           pixi-version: v0.41.4
           manifest-path: "modflow6/pixi.toml"
@@ -563,6 +573,7 @@ jobs:
         include:
           - os: ubuntu-22.04
           - os: macos-14
+          - os: macos-15-intel
           - os: windows-2022
             extended: false
           - os: windows-2022
@@ -591,7 +602,7 @@ jobs:
           version: ${{ inputs.compiler_version }}
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.9.3
+        uses: prefix-dev/setup-pixi@v0.9.4
         with:
           pixi-version: v0.41.4
           manifest-path: "modflow6/pixi.toml"
