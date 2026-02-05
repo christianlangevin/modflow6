@@ -96,6 +96,11 @@ olf-pcp.dfn
 olf-evp.dfn
 olf-sto.dfn
 olf-zdg.dfn
+lnf-chd.dfn
+lnf-cnd.dfn
+lnf-disu.dfn
+lnf-nam.dfn
+lnf-oc.dfn
 prt-nam.dfn
 prt-dis.dfn
 prt-disv.dfn

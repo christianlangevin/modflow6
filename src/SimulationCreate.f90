@@ -207,6 +207,7 @@ contains
     use GwfModule, only: gwf_cr
     use GwtModule, only: gwt_cr
     use GweModule, only: gwe_cr
+    use LnfModule, only: lnf_cr
     use OlfModule, only: olf_cr
     use PrtModule, only: prt_cr
     use NumericalModelModule, only: NumericalModelType, GetNumericalModelFromList
@@ -319,6 +320,17 @@ contains
             n, " will be created"
           call olf_cr(fname, n, model_names(n))
           call developmode('OLF is still under development, install the &
+            &nightly build or compile from source with IDEVELOPMODE = 1.')
+          num_model => GetNumericalModelFromList(basemodellist, im)
+          model_loc_idx(n) = im
+        end if
+      case ('LNF6')
+        if (model_ranks(n) == proc_id) then
+          im = im + 1
+          write (iout, '(4x,2a,i0,a)') trim(model_type), " model ", &
+            n, " will be created"
+          call lnf_cr(fname, n, model_names(n))
+          call developmode('LNF is still under development, install the &
             &nightly build or compile from source with IDEVELOPMODE = 1.')
           num_model => GetNumericalModelFromList(basemodellist, im)
           model_loc_idx(n) = im

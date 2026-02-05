@@ -18,6 +18,8 @@ module ModelPackageInputModule
                        GWF_BASEPKG, GWF_MULTIPKG
   use GwtModule, only: GWT_NBASEPKG, GWT_NMULTIPKG, &
                        GWT_BASEPKG, GWT_MULTIPKG
+  use LnfModule, only: LNF_NBASEPKG, LNF_NMULTIPKG, &
+                       LNF_BASEPKG, LNF_MULTIPKG
   use OlfModule, only: OLF_NBASEPKG, OLF_NMULTIPKG, &
                        OLF_BASEPKG, OLF_MULTIPKG
   use PrtModule, only: PRT_NBASEPKG, PRT_NMULTIPKG, &
@@ -34,8 +36,8 @@ module ModelPackageInputModule
   !!
   integer(I4B), parameter :: NMODEL = 10
   character(len=LENPACKAGETYPE), dimension(NMODEL) :: MODFLOW6MODELS
-  data MODFLOW6MODELS/'CHF6 ', 'GWE6 ', 'GWF6 ', 'GWT6 ', 'OLF6 ', & !  5
-                    &'PRT6 ', '     ', '     ', '     ', '     '/ ! 10
+  data MODFLOW6MODELS/'CHF6 ', 'GWE6 ', 'GWF6 ', 'GWT6 ', 'LNF6 ', & !  5
+                    &'OLF6 ', 'PRT6 ', '     ', '     ', '     '/ ! 10
 
 contains
 
@@ -72,6 +74,10 @@ contains
       numpkgs = GWT_NBASEPKG + GWT_NMULTIPKG
       allocate (pkgtypes(numpkgs))
       pkgtypes = [GWT_BASEPKG, GWT_MULTIPKG]
+    case ('LNF6')
+      numpkgs = LNF_NBASEPKG + LNF_NMULTIPKG
+      allocate (pkgtypes(numpkgs))
+      pkgtypes = [LNF_BASEPKG, LNF_MULTIPKG]
     case ('OLF6')
       numpkgs = OLF_NBASEPKG + OLF_NMULTIPKG
       allocate (pkgtypes(numpkgs))
@@ -128,6 +134,14 @@ contains
     case ('GWT')
       do n = 1, GWT_NMULTIPKG
         if (GWT_MULTIPKG(n) == pkgtype) then
+          multi_package = .true.
+          exit
+        end if
+      end do
+      !
+    case ('LNF')
+      do n = 1, LNF_NMULTIPKG
+        if (LNF_MULTIPKG(n) == pkgtype) then
           multi_package = .true.
           exit
         end if

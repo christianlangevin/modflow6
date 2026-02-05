@@ -133,6 +133,7 @@
 		<File RelativePath="..\src\Idm\selector\IdmGweDfnSelector.f90"/>
 		<File RelativePath="..\src\Idm\selector\IdmGwfDfnSelector.f90"/>
 		<File RelativePath="..\src\Idm\selector\IdmGwtDfnSelector.f90"/>
+		<File RelativePath="..\src\Idm\selector\IdmLnfDfnSelector.f90"/>
 		<File RelativePath="..\src\Idm\selector\IdmOlfDfnSelector.f90"/>
 		<File RelativePath="..\src\Idm\selector\IdmPrtDfnSelector.f90"/>
 		<File RelativePath="..\src\Idm\selector\IdmSimDfnSelector.f90"/>
@@ -214,6 +215,11 @@
 		<File RelativePath="..\src\Idm\gwt-ocidm.f90"/>
 		<File RelativePath="..\src\Idm\gwt-srcidm.f90"/>
 		<File RelativePath="..\src\Idm\gwt-ssmidm.f90"/>
+		<File RelativePath="..\src\Idm\lnf-chdidm.f90"/>
+		<File RelativePath="..\src\Idm\lnf-cndidm.f90"/>
+		<File RelativePath="..\src\Idm\lnf-disuidm.f90"/>
+		<File RelativePath="..\src\Idm\lnf-namidm.f90"/>
+		<File RelativePath="..\src\Idm\lnf-ocidm.f90"/>
 		<File RelativePath="..\src\Idm\olf-cdbidm.f90"/>
 		<File RelativePath="..\src\Idm\olf-chdidm.f90"/>
 		<File RelativePath="..\src\Idm\olf-dfwidm.f90"/>
@@ -369,6 +375,10 @@
 		<File RelativePath="..\src\Model\ModelUtilities\Xt3dInterface.f90"/></Filter>
 		<Filter Name="ChannelFlow">
 		<File RelativePath="..\src\Model\ChannelFlow\chf.f90"/></Filter>
+		<Filter Name="LinearNetworkFlow">
+		<File RelativePath="..\src\Model\LinearNetworkFlow\lnf.f90"/>
+		<File RelativePath="..\src\Model\LinearNetworkFlow\lnf-cnd.f90"/>
+		<File RelativePath="..\src\Model\LinearNetworkFlow\lnf-oc.f90"/></Filter>
 		<Filter Name="OverlandFlow">
 		<File RelativePath="..\src\Model\OverlandFlow\olf.f90"/></Filter>
 		<Filter Name="ParticleTracking">

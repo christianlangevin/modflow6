@@ -1,0 +1,46 @@
+# --------------------- lnf cnd options ---------------------
+
+block options
+name print_input
+type keyword
+reader urword
+optional true
+longname print input to listing file
+description REPLACE print_input {'{#1}': 'conductance'}
+
+block options
+name print_flows
+type keyword
+reader urword
+optional true
+longname print calculated flows to listing file
+description REPLACE print_flows {'{#1}': 'conductance'}
+
+block options
+name save_flows
+type keyword
+reader urword
+optional true
+longname save flows for package to budget file
+description REPLACE save_flows {'{#1}': 'conductance'}
+
+# --------------------- lnf cnd dimensions ---------------------
+
+block dimensions
+name nja
+type integer
+reader urword
+optional false
+longname total number of connections
+description is the sum of the number of connections and NODES.  When calculating the total number of connections, the connection between node n and node m is considered to be different from the connection between node m and node n.  Thus, NJA is equal to the total number of connections, including n to m and m to n, and the total number of nodes.
+
+# --------------------- lnf cnd griddata ---------------------
+
+block griddata
+name conductance
+type double precision
+shape (nja)
+reader readarray
+longname conductance for connections
+description is the conductance for each connection in the model grid. Conductance values are specified for each entry in the connectivity (JA) array. Values for the diagonal position and for symmetric off-diagonal positions must be specified but are not used.
+
