@@ -298,7 +298,7 @@ contains
     end do
 
     ! copy values from this object into the passed array
-    do nr = 1, this%isize
+    do nr = 1, this%dis%nodes
       nu = this%dis%get_nodeuser(nr)
       dblvec(nr) = this%variables(ivar)%dblvec(nu)
     end do
