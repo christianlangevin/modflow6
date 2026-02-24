@@ -1449,6 +1449,12 @@ contains
                           this%hfresh(n) + eps_f, &
                           this%alphas, &
                           this%hsalt(n) + eps_s)
+
+      ! cdl HACK -- keep minimum saltwater thickness
+      if (zetanew <= this%dis%bot(n)) then
+        zetanew = this%dis%bot(n) + 1.D-3
+      end if
+
     else
       ! freshwater only simulation
       zetanew = calc_zeta(this%alphaf, this%hfresh(n) + eps_f, &
