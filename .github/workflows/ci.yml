@@ -277,12 +277,15 @@ jobs:
           # arm mac, release mode
           - os: macos-14
             debug: false
+            xcode-version: '15.1.0'
           # arm mac, debug mode
           - os: macos-14
             debug: true
+            xcode-version: '15.1.0'
           # intel mac, release mode
           - os: macos-15-intel
             debug: false
+            xcode-version: '16.1.0'
           # ubuntu, release mode
           - os: ubuntu-22.04
             debug: false
@@ -344,18 +347,35 @@ jobs:
         working-directory: modflow6
         run: pixi run install
 
+      - name: Set xcode version (macOS)
+        if: runner.os == 'macOS'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ matrix.xcode-version }}
+
+      # static link gfortran libs
+      - name: Hide dylibs (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          version="${{ env.FC_V }}"
+          brew_prefix="$(brew --prefix)"
+          libpath="$brew_prefix/opt/gcc@$version/lib/gcc/$version"
+          mv $libpath/libgcc_s.1.1.dylib $libpath/libgcc_s.1.1.dylib.bak
+          mv $libpath/libgfortran.5.dylib $libpath/libgfortran.5.dylib.bak
+          mv $libpath/libquadmath.0.dylib $libpath/libquadmath.0.dylib.bak 
+
+      # use classic xcode linker, static link libgcc
       - name: Set LDFLAGS (macOS)
         if: runner.os == 'macOS'
         run: |
-          ldflags="$LDFLAGS -Wl,-ld_classic"
+          ldflags="$LDFLAGS -Wl,-ld_classic -static-libgcc"
           echo "LDFLAGS=$ldflags" >> $GITHUB_ENV
 
       - name: Update version files
         working-directory: modflow6
         run: pixi run update-version
 
-      - name: Build MF6
-        working-directory: modflow6
+      - name: Set setupargs
         run: |
           setupargs=""
           if [[ "${{ matrix.debug }}" == "true" ]]; then
@@ -363,15 +383,57 @@ jobs:
           elif [[ "${{ matrix.os }}" == "macos-14" ]]; then
             setupargs="-Doptimization=1"
           fi
-          pixi run setup builddir $setupargs
+          echo "MESON_SETUP_ARGS=$setupargs" >> $GITHUB_ENV
+
+      - name: Build MF6
+        working-directory: modflow6
+        run: |
+          pixi run setup builddir $MESON_SETUP_ARGS
           pixi run build builddir
-          pixi run setup-mf5to6 builddir $setupargs
+
+      - name: Build mf5to6 converter
+        working-directory: modflow6
+        run: |
+          pixi run setup-mf5to6 builddir $MESON_SETUP_ARGS
           pixi run build-mf5to6 builddir
 
       - name: Show build log
         if: failure()
         working-directory: modflow6
         run: cat builddir/meson-logs/meson-log.txt
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.os }}-${{ env.FC }}-${{ env.FC_V }}-meson-log.txt
+          path: modflow6/builddir/meson-logs/meson-log.txt
+
+      - name: Check arch/libs (macOS)
+        if: runner.os == 'macOS'
+        working-directory: modflow6/bin
+        run: |
+          otool -L mf6
+          otool -L libmf6.dylib
+          otool -L mf5to6
+          otool -L zbud6
+          lipo -info mf6 
+          lipo -info libmf6.dylib
+          lipo -info mf5to6
+          lipo -info zbud6
+
+      # TODO remove after next executables release. only necessary because
+      # tests using gridgen were failing as the current gridgen depends on
+      # some dylibs. new executables all statically link gcc/gfortran libs
+      - name: Restore dylibs (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          version="${{ env.FC_V }}"
+          brew_prefix="$(brew --prefix)"
+          libpath="$brew_prefix/opt/gcc@$version/lib/gcc/$version"
+          mv $libpath/libgcc_s.1.1.dylib.bak $libpath/libgcc_s.1.1.dylib
+          mv $libpath/libgfortran.5.dylib.bak $libpath/libgfortran.5.dylib
+          mv $libpath/libquadmath.0.dylib.bak $libpath/libquadmath.0.dylib
 
       - name: Unit test MF6
         working-directory: modflow6
@@ -688,11 +750,8 @@ jobs:
       - name: Set LDFLAGS (macOS)
         if: runner.os == 'macOS'
         run: |
-          os_ver=$(sw_vers -productVersion | cut -d'.' -f1)
-          if (( "$os_ver" > 12 )); then
-            ldflags="$LDFLAGS -Wl,-ld_classic"
-            echo "LDFLAGS=$ldflags" >> $GITHUB_ENV
-          fi
+          ldflags="$LDFLAGS -Wl,-ld_classic -static-libgcc"
+          echo "LDFLAGS=$ldflags" >> $GITHUB_ENV
 
       - name: Set markers
         id: set_markers
