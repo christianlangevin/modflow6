@@ -18,12 +18,12 @@ cases = [
 ncol = 21
 nlay = 1
 nrow = 1
-delr = np.array([10.] + 19 * [100.] + [10.])
+delr = np.array([10.0] + 19 * [100.0] + [10.0])
 delc = 1.0
 botm = -80.0
 recharge = {0: 0.0075, 1: 0.0}
 k_fw = 10.0
-k_sw = 10.0 #9.403669797
+k_sw = 10.0  # 9.403669797
 h0 = 0.0
 icelltype = 0
 iconvert = 0
@@ -104,8 +104,8 @@ def build_models(idx, test):
 
     # transient tdis
     nper = 2
-    perioddata = [(80000., 100, 1.0), (10000., 300, 1.0)]
-    perioddata = [(80000., 10, 1.0), (10000., 10, 1.0)]
+    perioddata = [(80000.0, 100, 1.0), (10000.0, 300, 1.0)]
+    perioddata = [(80000.0, 10, 1.0), (10000.0, 10, 1.0)]
     tdis = flopy.mf6.ModflowTdis(sim, nper=nper, perioddata=perioddata)
 
     ims = flopy.mf6.ModflowIms(
@@ -171,8 +171,8 @@ def check_output(idx, test):
     # get the flopy sim object
     sim = test.sims[0]
 
-    alphaf = 1000. / (1025. - 1000.)
-    alphas = 1025. / (1025. - 1000.)
+    alphaf = 1000.0 / (1025.0 - 1000.0)
+    alphas = 1025.0 / (1025.0 - 1000.0)
 
     # fresh gwf model
     ws = pl.Path(sim.sim_path)
