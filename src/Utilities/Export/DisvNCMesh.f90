@@ -497,6 +497,9 @@ contains
         verts(iv) = icvert(m)
       end do
 
+      ! don't close the cell
+      if (verts(iv) == verts(1)) verts(iv) = NF90_FILL_INT
+
       ! write face nodes array to netcdf file
       call nf_verify(nf90_put_var(this%ncid, this%var_ids%mesh_face_nodes, &
                                   verts, start=(/1, n/), &
