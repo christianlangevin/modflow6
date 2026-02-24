@@ -1450,7 +1450,7 @@ contains
                           this%alphas, &
                           this%hsalt(n) + eps_s)
 
-      ! cdl HACK -- keep minimum saltwater thickness 
+      ! cdl HACK -- keep minimum saltwater thickness
       if (zetanew <= this%dis%bot(n)) then
         zetanew = this%dis%bot(n) + 1.D-3
       end if
