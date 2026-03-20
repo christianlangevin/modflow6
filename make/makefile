@@ -461,6 +461,7 @@ $(OBJDIR)/prt-prp.o \
 $(OBJDIR)/prt-oc.o \
 $(OBJDIR)/prt-mip.o \
 $(OBJDIR)/MethodPool.o \
+$(OBJDIR)/ExplicitModel.o \
 $(OBJDIR)/gwf-api.o \
 $(OBJDIR)/swf.o \
 $(OBJDIR)/tsp.o \
@@ -608,8 +609,7 @@ $(OBJDIR)/gwf-sfr-transient.o \
 $(OBJDIR)/gwf-sfr-steady.o \
 $(OBJDIR)/gwf-sfr-constant.o \
 $(OBJDIR)/RectangularGeometry.o \
-$(OBJDIR)/CircularGeometry.o \
-$(OBJDIR)/ExplicitModel.o
+$(OBJDIR)/CircularGeometry.o
 
 # Define the objects that make up the program
 $(PROGRAM) : $(OBJECTS)

@@ -35,6 +35,7 @@ on:
       - "doc/**.sh"
       - "doc/**.xlsx"
       - ".hpc/**"
+  workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -67,6 +68,16 @@ jobs:
 
       - name: Check CITATION.cff
         run: pixi run check-citations
+
+      - name: Check generated Fortran IDM files are up to date
+        run: |
+          pixi run update-fortran-definitions
+          if ! git diff --exit-code src/Idm/; then
+            echo "::error::Generated Fortran IDM files are out of date!"
+            echo "::error::Run 'pixi run update-fortran-definitions' and commit changes."
+            git diff --stat src/Idm/
+            exit 1
+          fi
 
   build:
     name: Build
@@ -258,7 +269,7 @@ jobs:
 
       - name: Upload failed test output
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: failed-smoke-${{ runner.os }}-${{ env.FC }}-${{ env.FC_V }}
           path: modflow6/autotest/.failed
@@ -404,7 +415,7 @@ jobs:
 
       - name: Upload build log
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.os }}-${{ env.FC }}-${{ env.FC_V }}-meson-log.txt
           path: modflow6/builddir/meson-logs/meson-log.txt
@@ -510,7 +521,7 @@ jobs:
 
       - name: Upload failed test output
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: failed-${{ matrix.os }}-${{ env.FC }}-${{ env.FC_V }}
           path: modflow6/autotest/.failed
@@ -682,7 +693,7 @@ jobs:
 
       - name: Upload failed test output
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: failed-${{ matrix.os }}-${{ env.FC }}-${{ env.FC_V }}
           path: modflow6/autotest/.failed
@@ -743,10 +754,6 @@ jobs:
         working-directory: modflow6
         run: pixi run install
 
-      - name: Install additional netcdf testing packages
-        working-directory: modflow6
-        run: pixi run pip install xarray netcdf4
-
       - name: Set LDFLAGS (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -777,7 +784,7 @@ jobs:
 
       - name: Upload failed test output
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: failed-${{ matrix.os }}-ext
           path: modflow6/autotest/.failed

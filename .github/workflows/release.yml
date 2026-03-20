@@ -144,11 +144,6 @@ jobs:
         working-directory: modflow6
         run: pixi run install
 
-      - name: Install additional netcdf testing packages
-        if: matrix.extended
-        working-directory: modflow6
-        run: pixi run pip install xarray netcdf4
-      
       - name: Set version number
         id: set_version
         run: |
@@ -266,7 +261,7 @@ jobs:
 
       - name: Upload build log
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.os }}-${{ matrix.compiler }}-${{ matrix.version }}-meson-log.txt
           path: modflow6/builddir/meson-logs/meson-log.txt
@@ -385,7 +380,7 @@ jobs:
 
       - name: Upload failed test output
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: failed-${{ matrix.os }}-${{ inputs.compiler_toolchain }}-${{ inputs.compiler_version }}
           path: modflow6/autotest/.failed
@@ -396,7 +391,7 @@ jobs:
         run: rm -rf rebuilt downloaded
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: bin-${{ steps.ostag.outputs.ostag }}
           path: modflow6/bin
@@ -528,7 +523,7 @@ jobs:
           echo "ostag=$ostag" >> $GITHUB_OUTPUT
 
       - name: Download pre-built binaries
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: bin-${{ steps.ostag.outputs.ostag }}
           path: bin
@@ -565,7 +560,7 @@ jobs:
           cat md/deprecations.md
 
       - name: Upload deprecations
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: deprecations
           path: modflow6/doc/mf6io/mf6ivar/md/deprecations.md
@@ -595,7 +590,7 @@ jobs:
           mv "doc/ReleaseNotes.pdf" "doc/release.pdf"
 
       - name: Upload documentation artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: doc
           path: doc
@@ -682,7 +677,7 @@ jobs:
           echo "ostag=$ostag" >> $GITHUB_OUTPUT
 
       - name: Download artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           path: ${{ needs.build.outputs.distname }}_${{ steps.ostag.outputs.ostag }}
       
@@ -788,14 +783,14 @@ jobs:
           fi
 
       - name: Upload distribution
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: "${{ needs.build.outputs.distname }}_${{ steps.ostag.outputs.ostag }}"
           path: "${{ needs.build.outputs.distname }}_${{ steps.ostag.outputs.ostag }}.zip"
 
       - name: Upload release notes
         if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: release_notes
           path: "${{ needs.build.outputs.distname }}_${{ steps.ostag.outputs.ostag }}/doc/release.pdf"
