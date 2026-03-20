@@ -119,12 +119,9 @@ def build_models(idx, test):
         under_relaxation_momentum=0.0,
         outer_maximum=500,
         inner_maximum=600,
-        outer_dvclose=1e-3,
-        inner_dvclose=1e-5,
+        outer_dvclose=1e-7,
+        inner_dvclose=1e-8,
         linear_acceleration="bicgstab",
-        preconditioner_levels=7,
-        number_orthogonalizations=14,
-        preconditioner_drop_tolerance=1e-3,
     )
 
     gwf_freshwater = build_gwf_model(sim, False)

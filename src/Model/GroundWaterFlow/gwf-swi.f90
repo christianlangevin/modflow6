@@ -2,7 +2,8 @@ module GwfSwiModule
 
   use KindModule, only: DP, I4B, LGP
   use ConstantsModule, only: LINELENGTH, DONE, DZERO, LENBUDTXT, &
-                             MNORMAL, DHNOFLO, C3D_VERTICAL, LENMODELNAME
+                             MNORMAL, DHNOFLO, C3D_VERTICAL, LENMODELNAME, &
+                             DEM12
   use SimVariablesModule, only: errmsg
   use SimModule, only: store_error, store_error_filename
   use NumericalPackageModule, only: NumericalPackageType
@@ -1452,7 +1453,7 @@ contains
 
       ! cdl HACK -- keep minimum saltwater thickness
       if (zetanew <= this%dis%bot(n)) then
-        zetanew = this%dis%bot(n) + 1.D-3
+        zetanew = this%dis%bot(n) + DEM12
       end if
 
     else
