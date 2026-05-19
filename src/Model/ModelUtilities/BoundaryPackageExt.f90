@@ -153,7 +153,7 @@ contains
     if (.not. this%readasarrays) then
       ! -- copy nbound from input context
       call mem_set_value(this%nbound, 'NBOUND', this%input_mempath, &
-                         found)
+                         found, release=.false.)
     end if
 
     if (this%readarraygrid) then
@@ -306,12 +306,13 @@ contains
     integer(I4B) :: n
     !
     ! -- update defaults with idm sourced values
-    call mem_set_value(this%naux, 'NAUX', this%input_mempath, found%naux)
+    call mem_set_value(this%naux, 'NAUX', this%input_mempath, found%naux, &
+                       release=.false.)
     call mem_set_value(this%ipakcb, 'IPAKCB', this%input_mempath, found%ipakcb)
     call mem_set_value(this%iprpak, 'IPRPAK', this%input_mempath, found%iprpak)
     call mem_set_value(this%iprflow, 'IPRFLOW', this%input_mempath, found%iprflow)
     call mem_set_value(this%inamedbound, 'BOUNDNAMES', this%input_mempath, &
-                       found%boundnames)
+                       found%boundnames, release=.false.)
     call mem_set_value(sfacauxname, 'AUXMULTNAME', this%input_mempath, &
                        found%auxmultname)
     call mem_set_value(this%inewton, 'INEWTON', this%input_mempath, found%inewton)
@@ -330,7 +331,7 @@ contains
       call mem_reallocate(this%auxname_cst, LENAUXNAME, this%naux, &
                           'AUXNAME_CST', this%memoryPath)
       call mem_set_value(this%auxname_cst, 'AUXILIARY', this%input_mempath, &
-                         found%auxiliary)
+                         found%auxiliary, release=.false.)
       !
       do n = 1, this%naux
         this%auxname(n) = this%auxname_cst(n)
@@ -480,7 +481,7 @@ contains
 
       ! -- update defaults with idm sourced values
       call mem_set_value(this%maxbound, 'MAXBOUND', this%input_mempath, &
-                         found%maxbound)
+                         found%maxbound, release=.false.)
 
       write (this%iout, '(4x,a,i7)') 'MAXBOUND = ', this%maxbound
 
