@@ -7,7 +7,7 @@
 module SwiSwiExchangeModule
 
   use KindModule, only: DP, I4B, LGP
-  use ConstantsModule, only: DZERO, LINELENGTH, DONE
+  use ConstantsModule, only: DZERO, LINELENGTH, DONE, C3D_VERTICAL
   use SimModule, only: count_errors, store_error, store_error_filename, &
                        store_error_unit
   use SimVariablesModule, only: errmsg, model_loc_idx
@@ -49,6 +49,8 @@ module SwiSwiExchangeModule
     ! matrix position index arrays
     integer(I4B), dimension(:), pointer, contiguous :: idxglo => null() !< mapping to global (solution) amat
     integer(I4B), dimension(:), pointer, contiguous :: idxsymglo => null() !< mapping to global (solution) symmetric amat
+    integer(I4B), dimension(:), pointer, contiguous :: idxjasalt => null() !< mapping for freshwater nodes to saltwater ja positions
+    integer(I4B), dimension(:), pointer, contiguous :: idxjafresh => null() !< mapping for saltwater nodes to freshwater ja positions
 
   contains
 
@@ -75,6 +77,8 @@ module SwiSwiExchangeModule
     ! procedure :: source_data
     ! procedure :: noder
     ! procedure :: cellstr
+    procedure :: get_dsfdhs
+    procedure :: get_dssdhf
     procedure :: connects_model => swi_swi_connects_model
 
   end type SwiSwiExchangeType
@@ -245,13 +249,35 @@ contains
     type(sparsematrix), intent(inout) :: sparse
     ! local
     integer(I4B) :: n, iglo, jglo
+    integer(I4B) :: ipos, m
 
-    ! add exchange connections
+    ! add nexg exchange connections; this adds locations for fresh node
+    ! to salt node connections
     do n = 1, this%nexg
       iglo = n + this%gwf_fresh%moffset
       jglo = n + this%gwf_salt%moffset
       call sparse%addconnection(iglo, jglo, 1)
       call sparse%addconnection(jglo, iglo, 1)
+    end do
+
+    ! add cross flow connections from fresh node to salt nodes
+    do n = 1, this%gwf_fresh%dis%nodes
+      iglo = n + this%gwf_fresh%moffset
+      do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
+        m = this%gwf_salt%dis%con%ja(ipos)
+        jglo = m + this%gwf_salt%moffset
+        call sparse%addconnection(iglo, jglo, 1)
+      end do
+    end do
+
+    ! add cross flow connections from salt node to fresh nodes
+    do n = 1, this%gwf_salt%dis%nodes
+      iglo = n + this%gwf_salt%moffset
+      do ipos = this%gwf_fresh%dis%con%ia(n), this%gwf_fresh%dis%con%ia(n + 1) - 1
+        m = this%gwf_fresh%dis%con%ja(ipos)
+        jglo = m + this%gwf_fresh%moffset
+        call sparse%addconnection(iglo, jglo, 1)
+      end do
     end do
 
   end subroutine swi_swi_ac
@@ -268,6 +294,7 @@ contains
     class(MatrixBaseType), pointer :: matrix_sln !< the system matrix
     ! local
     integer(I4B) :: n, iglo, jglo
+    integer(I4B) :: ipos, m, idx
 
     ! map exchange connections
     do n = 1, this%nexg
@@ -275,6 +302,30 @@ contains
       jglo = n + this%gwf_salt%moffset
       this%idxglo(n) = matrix_sln%get_position(iglo, jglo)
       this%idxsymglo(n) = matrix_sln%get_position(jglo, iglo)
+    end do
+
+    ! add cross flow connections from fresh node to salt nodes
+    idx = 1
+    do n = 1, this%gwf_fresh%dis%nodes
+      iglo = n + this%gwf_fresh%moffset
+      do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
+        m = this%gwf_salt%dis%con%ja(ipos)
+        jglo = m + this%gwf_salt%moffset
+        this%idxjasalt(idx) = matrix_sln%get_position(iglo, jglo)
+        idx = idx + 1
+      end do
+    end do
+
+    ! add cross flow connections from salt node to fresh nodes
+    idx = 1
+    do n = 1, this%gwf_salt%dis%nodes
+      iglo = n + this%gwf_salt%moffset
+      do ipos = this%gwf_fresh%dis%con%ia(n), this%gwf_fresh%dis%con%ia(n + 1) - 1
+        m = this%gwf_fresh%dis%con%ja(ipos)
+        jglo = m + this%gwf_fresh%moffset
+        this%idxjafresh(idx) = matrix_sln%get_position(iglo, jglo)
+        idx = idx + 1
+      end do
     end do
 
   end subroutine swi_swi_mc
@@ -330,6 +381,7 @@ contains
   !<
   subroutine swi_swi_fc(this, kiter, matrix_sln, rhs_sln, inwtflag)
     ! modules
+    use GwfSwiModule, only: swi_thksat
     ! dummy
     class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
     integer(I4B), intent(in) :: kiter
@@ -338,21 +390,20 @@ contains
     integer(I4B), optional, intent(in) :: inwtflag
     ! local
     integer(I4B) :: n, iglo, jglo
+    integer(I4B) :: ipos, m, idx
+    integer(I4B) :: idxglopos, ihc
     real(DP) :: termf
     real(DP) :: terms
     real(DP) :: rtermf
     real(DP) :: rterms
+    real(DP) :: csat, q, dsfdhs, dssdhf, hfn, hfm, hsn, hsm
 
-    ! -- TODO: Since these terms are all Newton, do they go on the
-    !    here in _fc or should we put in _fn
-    !  ** this is not true.  they are not all newton terms.  The
-    !     storage term for the freshwater model has a saltwater model
-    !     dependency and vice versa.
+    ! -- TODO: these terms are Newton.  Should probably move to _fn
 
     ! If steady steady, then skip out
     if (this%gwf_fresh%iss == 1) return
 
-    ! -- Put terms into amatsln and rhs
+    ! -- Put cross storage terms into amatsln and rhs
     do n = 1, this%nexg
 
       iglo = n + this%gwf_fresh%moffset
@@ -366,13 +417,143 @@ contains
       call this%swi_cross_storage(n, termf, rtermf, terms, rterms)
 
       ! fill off-diagonal matrix coefficient
-      call matrix_sln%set_value_pos(this%idxglo(n), termf)
-      call matrix_sln%set_value_pos(this%idxsymglo(n), terms)
+      call matrix_sln%add_value_pos(this%idxglo(n), termf)
+      call matrix_sln%add_value_pos(this%idxsymglo(n), terms)
 
       ! update rhs for fresh model and salt model nodes
       rhs_sln(iglo) = rhs_sln(iglo) + rtermf
       rhs_sln(jglo) = rhs_sln(jglo) + rterms
+
     end do
+
+    ! FRESHWATER EQUATIONS
+    ! go through each freshwater cell and evaluate effect of cross flow terms
+    ! in connected saltwater cells
+    idx = 1
+    do n = 1, this%gwf_fresh%dis%nodes
+      iglo = n + this%gwf_fresh%moffset
+      do ipos = this%gwf_fresh%dis%con%ia(n), this%gwf_fresh%dis%con%ia(n + 1) - 1
+
+        ihc = this%gwf_fresh%npf%dis%con%ihc(this%gwf_fresh%npf%dis%con%jas(ipos))
+        if (ihc == C3D_VERTICAL) then
+          idx = idx + 1
+          cycle
+        end if
+
+        m = this%gwf_fresh%dis%con%ja(ipos)
+        jglo = m + this%gwf_salt%moffset
+
+        termf = DZERO
+        rtermf = DZERO
+        hfn = this%gwf_fresh%x(n)
+        hfm = this%gwf_fresh%x(m)
+        csat = this%gwf_fresh%npf%condsat(this%gwf_fresh%npf%dis%con%jas(ipos))
+
+        if (hfm > hfn) then
+          ! Saltwater head in m affects n-m conductance so need to include derivative
+          ! term in freshwater equation
+          q = csat * (hfm - hfn)
+          dsfdhs = this%get_dsfdhs(m, 2)
+
+          ! amat contribution
+          termf = dsfdhs * q
+          idxglopos = this%idxglo(n)
+
+          ! rhs contribution
+          hsm = this%gwf_salt%x(m)
+          rtermf = termf * hsm
+
+          call matrix_sln%add_value_pos(this%idxjasalt(idx), termf)
+          rhs_sln(iglo) = rhs_sln(iglo) + rtermf
+
+        else
+
+          ! Saltwater head in n affects n-m conductance so need to include derivative
+          ! term in freshwater equation
+          q = csat * (hfm - hfn)
+          dsfdhs = this%get_dsfdhs(n, 2)
+
+          ! amat contribution
+          termf = dsfdhs * q
+
+          ! rhs contribution
+          hsn = this%gwf_salt%x(n)
+          rtermf = termf * hsn
+
+          call matrix_sln%add_value_pos(this%idxglo(n), termf)
+          rhs_sln(iglo) = rhs_sln(iglo) + rtermf
+
+        end if
+
+        ! increment counter for idx array
+        idx = idx + 1
+      end do
+    end do
+
+    ! SALTWATER EQUATIONS
+    ! go through each freshwater cell and evaluate effect of cross flow terms
+    ! in connected saltwater cells
+    idx = 1
+    do n = 1, this%gwf_salt%dis%nodes
+      iglo = n + this%gwf_salt%moffset
+      do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
+
+        ihc = this%gwf_salt%npf%dis%con%ihc(this%gwf_salt%npf%dis%con%jas(ipos))
+        if (ihc == C3D_VERTICAL) then
+          idx = idx + 1
+          cycle
+        end if
+
+        m = this%gwf_salt%dis%con%ja(ipos)
+        jglo = m + this%gwf_fresh%moffset
+
+        terms = DZERO
+        rterms = DZERO
+        hsn = this%gwf_salt%x(n)
+        hsm = this%gwf_salt%x(m)
+        csat = this%gwf_salt%npf%condsat(this%gwf_salt%npf%dis%con%jas(ipos))
+
+        if (hsm > hsn) then
+          ! Freshwater head in m affects n-m conductance so need to include derivative
+          ! term in saltwater equation
+          q = csat * (hsm - hsn)
+          dssdhf = this%get_dssdhf(m, 2)
+
+          ! amat contribution
+          terms = dssdhf * q
+          idxglopos = this%idxsymglo(n)
+
+          ! rhs contribution
+          hfm = this%gwf_fresh%x(m)
+          rterms = terms * hfm
+
+          call matrix_sln%add_value_pos(this%idxjafresh(idx), terms)
+          rhs_sln(iglo) = rhs_sln(iglo) + rterms
+
+        else
+
+          ! Saltwater head in n affects n-m conductance so need to include derivative
+          ! term in freshwater equation
+          q = csat * (hsm - hsn)
+          dssdhf = this%get_dssdhf(n, 2)
+
+          ! amat contribution
+          terms = dssdhf * q
+
+          ! rhs contribution
+          hfn = this%gwf_fresh%x(n)
+          rterms = terms * hfn
+
+          call matrix_sln%add_value_pos(this%idxsymglo(n), terms)
+          rhs_sln(iglo) = rhs_sln(iglo) + rterms
+
+        end if
+
+        ! increment counter for idx array
+        idx = idx + 1
+      end do
+    end do
+
     ! !
     ! ! -- Set inwt to exchange newton, but shut off if requested by caller
     ! inwt = this%inewton
@@ -407,9 +588,6 @@ contains
     real(DP) :: bt
     real(DP) :: tthk
     real(DP) :: hf, hs
-    real(DP) :: snnewf, snnews
-    real(DP) :: zetanew
-    real(DP) :: zetaold
     real(DP) :: dssdhf
     real(DP) :: dsfdhs
 
@@ -418,10 +596,6 @@ contains
 
     if (this%gwf_fresh%ibound(n) <= 0) return
 
-    ! calculate zetanew and zetaold
-    zetanew = this%gwf_fresh%swi%get_zetanew(n)
-    zetaold = this%gwf_fresh%swi%get_zetaold(n)
-
     ! aquifer elevations and thickness
     tp = this%gwf_fresh%dis%top(n)
     bt = this%gwf_fresh%dis%bot(n)
@@ -429,50 +603,121 @@ contains
     hf = this%gwf_fresh%x(n)
     hs = this%gwf_salt%x(n)
 
-    ! aquifer freshwater and saltwater saturations
-    snnews = sQuadraticSaturation(tp, bt, zetanew)
-    snnewf = DONE - snnews
-
     ! storage coefficients
     sc2 = SyCapacity(this%gwf_fresh%dis%area(n), this%gwf_fresh%sto%sy(n))
     rho2 = sc2 * tled
 
-    !
-    ! calculate newton terms for specific yield
-    !
-    ! calculate saturation derivative as dS/dzeta * dzeta/dh_fresh
-    !    derv = sQuadraticSaturationDerivative(tp, bt, zetanew)
-    !    derv = derv * dssdh
-    ! -----------------------------------------------------
-    ! calculate cross-saturation derivative parts directly as dSf / dhs and dSs / dhf
-    !  dereps = 1e-6
-    ! for dSf / dhs
-    !  zetanew = this%gwf_fresh%swi%get_zetanew(n, eps_salt=dereps)
-    !  dsaltsat = sQuadraticSaturation(tp, bt, zetanew, this%gwf_fresh%sto%satomega)
-    !  dfreshsat = DONE - dsaltsat
-    !  dsfdhs = (dfreshsat - snnewf) / dereps
-    !
-    ! for dSs / dhf
-    !  zetanew = this%gwf_fresh%swi%get_zetanew(n, eps_fresh=dereps)
-    !  dsaltsat = sQuadraticSaturation(tp, bt, zetanew, this%gwf_fresh%sto%satomega)
-    !  dssdhf = (dsaltsat - snnews) / dereps
-    ! ----------------------------------------------------
-    ! calculate saturation derivative for saltwater as rhof/(rhos-rhof)/TOTTHICK and freshwater as rhos/(rhos-rhof)/TOTTHICK
-    dsfdhs = -this%gwf_fresh%swi%alphas / tthk
-    dssdhf = -this%gwf_fresh%swi%alphaf / tthk
-
-    !   dsfdhs = -0.5125
-    !   dssdhf = -0.5
-    ! ----------------------------------------------------
-    !
-    ! newton cross terms for specific yield
+    dsfdhs = this%get_dsfdhs(n, itype=2)
     termf = -rho2 * tthk * dsfdhs
     rtermf = termf * hs
 
+    dssdhf = this%get_dssdhf(n, itype=2)
     terms = -rho2 * tthk * dssdhf
     rterms = terms * hf
 
   end subroutine swi_cross_storage
+
+  !> @ brief Calculate dSf/dhs for cross storage terms
+  function get_dsfdhs(this, n, itype) result(dsfdhs)
+    ! dummy
+    class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
+    integer(I4B), intent(in) :: n !< node number
+    integer(I4B), intent(in) :: itype !< 1 for perturbation, 2 for analytical
+    real(DP) :: dsfdhs !< derivative of freshwater saturation with respect to saltwater head
+    ! local
+    real(DP) :: dereps !< perturbation for numerical derivative
+    real(DP) :: tp !< top elevation
+    real(DP) :: bt !< bottom elevation
+    real(DP) :: z !< zeta
+    real(DP) :: zp !< zeta with perturbation
+    real(DP) :: ss !< saltwater saturation
+    real(DP) :: ssp !< saltwater saturation with perturbation
+    real(DP) :: dssdzeta !< derivative of saltwater saturation with respect to zeta
+    real(DP) :: dsfdzeta !< derivative of freshwater saturation with respect to zeta
+    real(DP) :: dzetadhs !< derivative of zeta with respect to saltwater head
+
+    dereps = 1.D-10
+    tp = this%gwf_fresh%dis%top(n)
+    bt = this%gwf_fresh%dis%bot(n)
+    select case (itype)
+    case (1)
+      ! perturbation derivative forward difference
+      z = this%gwf_fresh%swi%get_zetanew(n)
+      zp = this%gwf_fresh%swi%get_zetanew(n, eps_salt=dereps)
+      ss = sQuadraticSaturation(tp, bt, z, this%gwf_fresh%sto%satomega)
+      ssp = sQuadraticSaturation(tp, bt, zp, this%gwf_fresh%sto%satomega)
+      ! sf = 1 - ss, sfp = 1 - ssp; sfp - sf = ss - ssp
+      dsfdhs = (ss - ssp) / dereps
+    case (2)
+      ! perturbation derivative central difference
+      z = this%gwf_fresh%swi%get_zetanew(n, eps_salt=-dereps)
+      zp = this%gwf_fresh%swi%get_zetanew(n, eps_salt=dereps)
+      ss = sQuadraticSaturation(tp, bt, z, this%gwf_fresh%sto%satomega)
+      ssp = sQuadraticSaturation(tp, bt, zp, this%gwf_fresh%sto%satomega)
+      ! sf = 1 - ss, sfp = 1 - ssp; sfp - sf = ss - ssp
+      dsfdhs = (ss - ssp) / (2.D0 * dereps)
+    case (3)
+      ! analytical derivative
+      z = this%gwf_fresh%swi%get_zetanew(n)
+      dssdzeta = sQuadraticSaturationDerivative(tp, bt, z, &
+                                                this%gwf_fresh%sto%satomega)
+      dsfdzeta = -dssdzeta
+      dzetadhs = this%gwf_fresh%swi%alphas
+      dsfdhs = dsfdzeta * dzetadhs
+    case default
+      dsfdhs = DZERO
+    end select
+
+  end function get_dsfdhs
+
+  !> @ brief Calculate dSs/dhf for cross storage terms
+  function get_dssdhf(this, n, itype) result(dssdhf)
+    ! dummy
+    class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
+    integer(I4B), intent(in) :: n !< node number
+    integer(I4B), intent(in) :: itype !< 1 for perturbation, 2 for analytical
+    real(DP) :: dssdhf !< derivative of saltwater saturation with respect to freshwater head
+    ! local
+    real(DP) :: dereps !< perturbation for numerical derivative
+    real(DP) :: tp !< top elevation
+    real(DP) :: bt !< bottom elevation
+    real(DP) :: z !< zeta
+    real(DP) :: zp !< zeta with perturbation
+    real(DP) :: ss !< saltwater saturation
+    real(DP) :: ssp !< saltwater saturation with perturbation
+    real(DP) :: dssdzeta !< derivative of saltwater saturation with respect to zeta
+    real(DP) :: dzetadhf !< derivative of zeta with respect to freshwater head
+
+    dereps = 1.D-10
+    tp = this%gwf_fresh%dis%top(n)
+    bt = this%gwf_fresh%dis%bot(n)
+    select case (itype)
+    case (1)
+      ! perturbation derivative forward difference
+      z = this%gwf_fresh%swi%get_zetanew(n)
+      zp = this%gwf_fresh%swi%get_zetanew(n, eps_fresh=dereps)
+      ss = sQuadraticSaturation(tp, bt, z, this%gwf_fresh%sto%satomega)
+      ssp = sQuadraticSaturation(tp, bt, zp, this%gwf_fresh%sto%satomega)
+      dssdhf = (ssp - ss) / dereps
+    case (2)
+      ! perturbation derivative central difference
+      z = this%gwf_fresh%swi%get_zetanew(n, eps_fresh=-dereps)
+      zp = this%gwf_fresh%swi%get_zetanew(n, eps_fresh=dereps)
+      ss = sQuadraticSaturation(tp, bt, z, this%gwf_fresh%sto%satomega)
+      ssp = sQuadraticSaturation(tp, bt, zp, this%gwf_fresh%sto%satomega)
+      dssdhf = (ssp - ss) / (2.D0 * dereps)
+    case (3)
+      ! analytical derivative
+      z = this%gwf_fresh%swi%get_zetanew(n)
+      dssdzeta = sQuadraticSaturationDerivative(tp, bt, z, &
+                                                this%gwf_fresh%sto%satomega)
+      dzetadhf = -this%gwf_fresh%swi%alphaf
+      dssdhf = dssdzeta * dzetadhf
+    case default
+      dssdhf = DZERO
+    end select
+
+  end function get_dssdhf
 
   ! !> @ brief Fill Newton
   ! !!
@@ -736,6 +981,8 @@ contains
     ! arrays
     call mem_deallocate(this%idxglo)
     call mem_deallocate(this%idxsymglo)
+    call mem_deallocate(this%idxjasalt)
+    call mem_deallocate(this%idxjafresh)
 
     ! scalars
     deallocate (this%filename)
@@ -756,25 +1003,23 @@ contains
     class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
     ! local
     integer(I4B) :: i
+    integer(I4B) :: idxsize
 
-    ! call mem_allocate(this%nodem1, this%nexg, 'NODEM1', this%memoryPath)
-    ! call mem_allocate(this%nodem2, this%nexg, 'NODEM2', this%memoryPath)
-    ! call mem_allocate(this%amat_fresh, this%nexg, 'AMAT_FRESH', this%memoryPath)
-    ! call mem_allocate(this%rhs_fresh, this%nexg, 'RHS_FRESH', this%memoryPath)
-    ! call mem_allocate(this%amat_salt, this%nexg, 'AMAT_SALT', this%memoryPath)
-    ! call mem_allocate(this%rhs_salt, this%nexg, 'RHS_SALT', this%memoryPath)
     call mem_allocate(this%idxglo, this%nexg, 'IDXGLO', this%memoryPath)
     call mem_allocate(this%idxsymglo, this%nexg, 'IDXSYMGLO', this%memoryPath)
-    ! call mem_allocate(this%simvals, this%nexg, 'SIMVALS', this%memoryPath)
+
+    idxsize = this%gwf_fresh%dis%con%nja
+    call mem_allocate(this%idxjasalt, idxsize, 'IDXJASALT', this%memoryPath)
+    call mem_allocate(this%idxjafresh, idxsize, 'IDXJAFRESH', this%memoryPath)
 
     ! Initialize
     do i = 1, this%nexg
       this%idxglo(i) = 0
       this%idxsymglo(i) = 0
-      ! this%amat_fresh(i) = DNODATA
-      ! this%rhs_fresh(i) = DNODATA
-      ! this%amat_salt(i) = DNODATA
-      ! this%rhs_salt(i) = DNODATA
+    end do
+    do i = 1, idxsize
+      this%idxjasalt(i) = 0
+      this%idxjafresh(i) = 0
     end do
     !
     ! -- Return

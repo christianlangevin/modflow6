@@ -1,14 +1,5 @@
 """
-Test of the seawater intrusion (SWI) package for coupled
-freshwater and saltwater model using the SWI-SWI exchange.
-Use a simple 1-layer model with 21 columns and 1 row.
-Case a is for confined and case b is for unconfined. There
-are two transient stress periods.  The first stress period
-has fresh groundwater recharge, which causes a freshwater
-bubble to form.  There is no freshwater recharge for the
-second stress period, which causes the freshwater bubble to
-shrink. The test checks that the zeta computed by the SWI
-package is correct.
+bubble setup so matrix can be extracted
 
 """
 
@@ -20,19 +11,20 @@ import pytest
 from framework import TestFramework
 
 cases = [
-    "swi08a-conf",
-    "swi08b-unconf",
+    "swi10a-conf",
+    "swi10b-unconf",
 ]
 
 ncol = 21
 nlay = 1
 nrow = 1
 delr = np.array([10.0] + 19 * [100.0] + [10.0])
+delr = 100.0
 delc = 1.0
 botm = -80.0
 recharge = {0: 0.0075, 1: 0.0}
 k_fw = 10.0
-k_sw = 10.0  # 9.403669797
+k_sw = 10.0
 h0 = 0.0
 icelltype = [0, 1]
 iconvert = [0, 1]
@@ -64,6 +56,8 @@ def build_gwf_model(idx, sim, is_saltwater):
         top=top[idx],
         botm=botm,
     )
+    # initialize starting head with 0 for saltwater model
+    # and 1 for freshwater model (except at boundaries)
     strt = 0.0 if is_saltwater else 0.001
     ic = flopy.mf6.ModflowGwfic(gwf, strt=strt)
     npf = flopy.mf6.ModflowGwfnpf(
@@ -113,7 +107,7 @@ def build_models(idx, test):
 
     # transient tdis
     nper = 2
-    perioddata = [(80000.0, 100, 1.0), (10000.0, 10, 1.0)]
+    perioddata = [(10000.0, 10, 1.0), (10000.0, 10, 1.0)]
     tdis = flopy.mf6.ModflowTdis(sim, nper=nper, perioddata=perioddata)
 
     ims = flopy.mf6.ModflowIms(
