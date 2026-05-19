@@ -1,14 +1,7 @@
 """
 Test of the seawater intrusion (SWI) package for coupled
 freshwater and saltwater model using the SWI-SWI exchange.
-Use a simple 1-layer model with 21 columns and 1 row.
-Case a is for confined and case b is for unconfined. There
-are two transient stress periods.  The first stress period
-has fresh groundwater recharge, which causes a freshwater
-bubble to form.  There is no freshwater recharge for the
-second stress period, which causes the freshwater bubble to
-shrink. The test checks that the zeta computed by the SWI
-package is correct.
+Same as case8 except has 2 layers.
 
 """
 
@@ -20,16 +13,16 @@ import pytest
 from framework import TestFramework
 
 cases = [
-    "swi08a-conf",
-    "swi08b-unconf",
+    "swi09a-conf",
+    "swi09b-unconf",
 ]
 
 ncol = 21
-nlay = 1
+nlay = 2
 nrow = 1
 delr = np.array([10.0] + 19 * [100.0] + [10.0])
 delc = 1.0
-botm = -80.0
+botm = [-40.0, -80.0]
 recharge = {0: 0.0075, 1: 0.0}
 k_fw = 10.0
 k_sw = 10.0  # 9.403669797
@@ -80,9 +73,11 @@ def build_gwf_model(idx, sim, is_saltwater):
         gwf,
         zeta_filerecord=zeta_file,
     )
+    chd_spd = [[0, 0, 0, h0], [0, 0, ncol - 1, h0]]
+    chd_spd += [[1, 0, 0, h0], [1, 0, ncol - 1, h0]]
     chd = flopy.mf6.ModflowGwfchd(
         gwf,
-        stress_period_data=[[0, 0, 0, h0], [0, 0, ncol - 1, h0]],
+        stress_period_data=chd_spd,
     )
     if not is_saltwater:
         rch = flopy.mf6.ModflowGwfrcha(gwf, recharge=recharge)
@@ -156,16 +151,21 @@ def plot_output(idx, test):
     gwf = sim.gwf[0]
     x = gwf.modelgrid.xcellcenters.flatten()
     fpth = pl.Path(ws) / f"{gwf.name}.zta"
-    head = gwf.output.head().get_data().flatten()
+    head = gwf.output.head().get_data().flatten().reshape((nlay, ncol))
+    head_saltwater = sim.gwf[1].output.head().get_data().flatten().reshape((nlay, ncol))
+
     zobj = flopy.utils.HeadFile(fpth, text="zeta")
     times = zobj.times
 
     ax = plt.subplot(1, 1, 1)
     pxs = flopy.plot.PlotCrossSection(gwf, line={"row": 0}, ax=ax)
     for t in times:
-        zeta = zobj.get_data(totim=t).flatten()
-        ax.plot(x, zeta, "k-")
-    ax.plot(x, head, "b-")
+        zeta = zobj.get_data(totim=t).flatten().reshape((nlay, ncol))
+        for ilay in range(nlay):
+            ax.plot(x, zeta[ilay], "k-")
+
+    ax.plot(x, head[0], "b-")
+    ax.plot(x, head_saltwater[0], "r-")
 
     ax.set_ylim(-100, 10.0)
     plt.savefig(ws / "zeta.png")
@@ -196,13 +196,17 @@ def check_output(idx, test):
     zeta_s = flopy.utils.HeadFile(fpth, text="zeta").get_data().flatten()
 
     zeta_answer = -alphaf * head_f + alphas * head_s
+    botm = gwf_fresh.dis.botm.array.flatten()
+    top = gwf_fresh.dis.top.array.flatten()
+    top = np.array([t for t in top] + ncol * [-40.0])
+    zeta_answer = np.where(zeta_answer > top, top, zeta_answer)
+    zeta_answer = np.where(zeta_answer < botm, botm, zeta_answer)
     for j in range(head_f.shape[0]):
         print(j, head_f[j], head_s[j], zeta[j], zeta_s[j], zeta_answer[j])
     assert np.allclose(zeta, zeta_answer), f"zeta is not right {zeta} /= {zeta_answer}"
     assert np.allclose(zeta, zeta_s), (
         f"salt zeta not equal fresh zeta {zeta_s} /= {zeta}"
     )
-    # assert np.allclose(head_s, 0), f"salt head is not zero {head_s}"
 
 
 @pytest.mark.developmode

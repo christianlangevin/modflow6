@@ -16,13 +16,14 @@ module GwfSwiModule
   use MemoryManagerModule, only: mem_setptr, mem_allocate
   use MemoryHelperModule, only: create_mem_path
   use MatrixBaseModule
-  use GwfConductanceUtilsModule, only: hcond
+  use GwfConductanceUtilsModule, only: hcond, vcond
   use UtlTvaModule, only: UtlTvaType
 
   implicit none
   private
   public :: GwfSwiType
   public :: swi_cr
+  public :: swi_thksat
 
   character(len=LENBUDTXT), dimension(1) :: budtxt = & !< text labels for budget terms
     &['         STORAGE']
@@ -30,6 +31,7 @@ module GwfSwiModule
   integer(I4B), parameter :: FRESHWATER_TWO_FLUID = 1 !< freshwater model with swi-swi exchange
   integer(I4B), parameter :: SALTWATER_ONE_FLUID = 2 !< saltwater model without swi-swi exchange, not supported
   integer(I4B), parameter :: SALTWATER_TWO_FLUID = 3 !< saltwater model with swi-swi exchange
+  real(DP), parameter :: ZONE_MINIMUM_THICKNESS = 1.d-3 !< minimum thickness of saltwater or freshwater zone to avoid numerical issues
 
   type, extends(NumericalPackageType) :: GwfSwiType
 
@@ -88,6 +90,7 @@ module GwfSwiModule
     procedure, private :: update_zeta
     procedure, private :: swi_fc_storage
     procedure, private :: swi_fn_storage
+    procedure, public :: swi_saturated_thickness
 
     procedure :: set_configuration
     procedure :: set_head_pointers
@@ -296,30 +299,17 @@ contains
     integer(I4B) :: inwt
     ! formats
     !
-    !fill zeta
-    do n = 1, this%dis%nodes
-      this%zeta(n) = this%get_zetanew(n)
-    end do
-    !
-    !-----------------------------------------------------------------------Dont zero out
-    ! If saltwater equation then clear AMAT and RHS of solution
-    !if (this%isaltwater == 1) then
-    !  value = 0.0d0
-    !  nodes = npf%dis%nodes
-    !  do n = 1, nodes
-    !    do ii = npf%dis%con%ia(n) + 1, npf%dis%con%ia(n + 1) - 1
-    !      idiag = npf%dis%con%ia(n)
-    !      call matrix_sln%set_value_pos(idxglo(ii), value)
-    !      call matrix_sln%set_value_pos(idxglo(idiag), value)
-    !      rhs(n) = value
-    !    enddo
-    !  enddo
-    !endif
-    !-----------------------------------------------------------------------
+    ! fill zeta
+    call this%update_zeta()
     !
     ! fill swi Picard term
     call npf_fc_swi(npf, kiter, matrix_sln, idxglo, &
                     rhs, hnew, this%zeta, this%isaltwater)
+    if (this%isaltwater == 1) then
+      call npf_fc_vflow(npf, kiter, matrix_sln, idxglo, &
+                        rhs, hnew)
+    end if
+
     !
     ! test if steady-state stress period
     if (this%iss /= 0) return
@@ -1349,28 +1339,6 @@ contains
     ! type(GwfSwiParamFoundType) :: found
     ! integer(I4B), dimension(:), pointer, contiguous :: map
 
-    ! In an earlier implementation, we read the initial zeta surface
-    ! from the input file, but this is not needed anymore as the
-    ! the model will calculate the initial zeta surface based on the
-    ! initial head
-
-    ! set map to convert user to reduced node data
-    ! map => null()
-    ! if (this%dis%nodes < this%dis%nodesuser) map => this%dis%nodeuser
-
-    ! set values
-    ! call mem_set_value(this%zeta, 'ZETASTRT', this%input_mempath, map, &
-    !                    found%zetastrt)
-
-    ! ensure ZETASTRT was found
-    ! if (.not. found%zetastrt) then
-    !   write (errmsg, '(a)') 'Error in GRIDDATA block: ZETASTRT not found.'
-    !   call store_error(errmsg, terminate=.false.)
-    !   call store_error_filename(this%input_fname)
-    ! else if (this%iout > 0) then
-    !   write (this%iout, '(4x,a)') 'ZETASTRT set from input file'
-    ! end if
-
   end subroutine source_griddata
 
   !> @brief Set this model configuration.
@@ -1452,9 +1420,9 @@ contains
                           this%hsalt(n) + eps_s)
 
       ! cdl HACK -- keep minimum saltwater thickness
-      if (zetanew <= this%dis%bot(n)) then
-        zetanew = this%dis%bot(n) + DEM12
-      end if
+      ! if (zetanew <= this%dis%bot(n)) then
+      !   zetanew = this%dis%bot(n) + 1.d-3 ! cdl DEM12
+      ! end if
 
     else
       ! freshwater only simulation
@@ -1568,6 +1536,7 @@ contains
     real(DP) :: cond
     real(DP) :: satn, satm
     integer(I4B) :: ictn, ictm
+    real(DP) :: bs, bf
     !
     ! Calculate conductance and put into amat
     !
@@ -1605,8 +1574,33 @@ contains
         ! upstream is based on head and not zeta
         call swi_thksat(n, npf%dis%top(n), npf%dis%bot(n), &
                         zeta(n), satn, npf%inewton)
+
+        bs = satn * (npf%dis%top(n) - npf%dis%bot(n))
+        bs = max(bs, 1.d-3)
+        if (bs <= 1.d-3) then
+          bs = 1.d-3
+          satn = bs / (npf%dis%top(n) - npf%dis%bot(n))
+        end if
+        bf = (DONE - satn) * (npf%dis%top(n) - npf%dis%bot(n))
+        if (bf <= 1.d-3) then
+          bf = 1.d-3
+          satn = 1.d0 - bf / (npf%dis%top(n) - npf%dis%bot(n))
+        end if
+
         call swi_thksat(m, npf%dis%top(m), npf%dis%bot(m), &
                         zeta(m), satm, npf%inewton)
+
+        bs = satm * (npf%dis%top(m) - npf%dis%bot(m))
+        if (bs <= 1.d-3) then
+          bs = 1.d-3
+          satm = bs / (npf%dis%top(m) - npf%dis%bot(m))
+        end if
+        bf = (DONE - satm) * (npf%dis%top(m) - npf%dis%bot(m))
+        if (bf <= 1.d-3) then
+          bf = 1.d-3
+          satm = 1.d0 - bf / (npf%dis%top(m) - npf%dis%bot(m))
+        end if
+
         cond = hcond(npf%ibound(n), npf%ibound(m), &
                      ictn, ictm, &
                      npf%inewton, &
@@ -1641,6 +1635,119 @@ contains
       end do
     end do
   end subroutine npf_fc_swi
+
+  ! add vertical connections for saltwater model
+  subroutine npf_fc_vflow(npf, kiter, matrix_sln, idxglo, rhs, hnew)
+    ! -- modules
+    use ConstantsModule, only: DONE
+    ! -- dummy
+    class(GwfNpfType) :: npf
+    integer(I4B) :: kiter
+    class(MatrixBaseType), pointer :: matrix_sln
+    integer(I4B), intent(in), dimension(:) :: idxglo
+    real(DP), intent(inout), dimension(:) :: rhs
+    real(DP), intent(in), dimension(:) :: hnew
+    ! -- local
+    integer(I4B) :: n, m, ii, idiag, ihc
+    integer(I4B) :: isymcon, idiagm
+    real(DP) :: hyn, hym
+    real(DP) :: cond
+    ! real(DP) :: satn
+    ! real(DP) :: satm
+    !
+    ! -- Calculate conductance and put into amat
+    !
+    if (npf%ixt3d /= 0) then
+      ! call npf%xt3d%xt3d_fc(kiter, matrix_sln, idxglo, rhs, hnew)
+    else
+      do n = 1, npf%dis%nodes
+        do ii = npf%dis%con%ia(n) + 1, npf%dis%con%ia(n + 1) - 1
+          if (npf%dis%con%mask(ii) == 0) cycle
+
+          m = npf%dis%con%ja(ii)
+          !
+          ! -- Calculate conductance only for upper triangle but insert into
+          !    upper and lower parts of amat.
+          if (m < n) cycle
+          ihc = npf%dis%con%ihc(npf%dis%con%jas(ii))
+          hyn = npf%hy_eff(n, m, ihc, ipos=ii)
+          hym = npf%hy_eff(m, n, ihc, ipos=ii)
+          !
+          ! -- Vertical connection
+          if (ihc == C3D_VERTICAL) then
+            !
+            ! -- Calculate vertical conductance
+            cond = vcond(npf%ibound(n), npf%ibound(m), &
+                         npf%icelltype(n), npf%icelltype(m), npf%inewton, &
+                         npf%ivarcv, npf%idewatcv, &
+                         npf%condsat(npf%dis%con%jas(ii)), hnew(n), hnew(m), &
+                         hyn, hym, &
+                         npf%sat(n), npf%sat(m), &
+                         npf%dis%top(n), npf%dis%top(m), &
+                         npf%dis%bot(n), npf%dis%bot(m), &
+                         npf%dis%con%hwva(npf%dis%con%jas(ii)))
+            !
+            ! -- Vertical flow for perched conditions
+            if (npf%iperched /= 0) then
+              if (npf%icelltype(m) /= 0) then
+                if (hnew(m) < npf%dis%top(m)) then
+                  !
+                  ! -- Fill row n
+                  idiag = npf%dis%con%ia(n)
+                  rhs(n) = rhs(n) - cond * npf%dis%bot(n)
+                  call matrix_sln%add_value_pos(idxglo(idiag), -cond)
+                  !
+                  ! -- Fill row m
+                  isymcon = npf%dis%con%isym(ii)
+                  call matrix_sln%add_value_pos(idxglo(isymcon), cond)
+                  rhs(m) = rhs(m) + cond * npf%dis%bot(n)
+                  !
+                  ! -- cycle the connection loop
+                  cycle
+                end if
+              end if
+            end if
+            !
+          else
+            cond = DZERO
+            ! satn = this%sat(n)
+            ! satm = this%sat(m)
+            ! if (this%ihighcellsat /= 0) then
+            !   call this%highest_cell_saturation(n, m, &
+            !                                     hnew(n), hnew(m), &
+            !                                     satn, satm)
+            ! end if
+            ! !
+            ! ! -- Horizontal conductance
+            ! cond = hcond(this%ibound(n), this%ibound(m), &
+            !              this%icelltype(n), this%icelltype(m), &
+            !              this%inewton, &
+            !              this%dis%con%ihc(this%dis%con%jas(ii)), &
+            !              this%icellavg, &
+            !              this%condsat(this%dis%con%jas(ii)), &
+            !              hnew(n), hnew(m), satn, satm, hyn, hym, &
+            !              this%dis%top(n), this%dis%top(m), &
+            !              this%dis%bot(n), this%dis%bot(m), &
+            !              this%dis%con%cl1(this%dis%con%jas(ii)), &
+            !              this%dis%con%cl2(this%dis%con%jas(ii)), &
+            !              this%dis%con%hwva(this%dis%con%jas(ii)))
+          end if
+          !
+          ! -- Fill row n
+          idiag = npf%dis%con%ia(n)
+          call matrix_sln%add_value_pos(idxglo(ii), cond)
+          call matrix_sln%add_value_pos(idxglo(idiag), -cond)
+          !
+          ! -- Fill row m
+          isymcon = npf%dis%con%isym(ii)
+          idiagm = npf%dis%con%ia(m)
+          call matrix_sln%add_value_pos(idxglo(isymcon), cond)
+          call matrix_sln%add_value_pos(idxglo(idiagm), -cond)
+        end do
+      end do
+      !
+    end if
+  end subroutine npf_fc_vflow
 
   !> @brief Fill newton terms
   !<
@@ -1789,7 +1896,7 @@ contains
     return
   end subroutine npf_fn_swi
 
-  !> @brief Fractional cell saturation
+  !> @brief Fractional cell freshwater saturation
   !<
   subroutine swi_thksat(n, top, bot, zeta, thksat, inewton)
     ! dummy
@@ -1815,5 +1922,35 @@ contains
     ! Return
     return
   end subroutine swi_thksat
+
+  !> @brief Calculated the saturated thickness of either the freshwater
+  !< or saltwater zone, depending on which model this package is assigned
+  !< to, and return the value.
+  !<
+  function swi_saturated_thickness(this, n, h, ict) result(zone_thickness)
+    ! modules
+    ! dummy
+    class(GwfSwiType) :: this
+    ! locals
+    integer(I4B), intent(in) :: n
+    integer(I4B), intent(in) :: ict
+    real(DP), intent(in) :: h
+    real(DP) :: b
+    real(DP) :: tp
+    real(DP) :: zeta
+    real(DP) :: zone_thickness
+
+    zeta = this%get_zetanew(n)
+    if (this%isaltwater == 1) then
+      b = zeta - this%dis%bot(n)
+    else
+      tp = this%dis%top(n)
+      if (ict == 1) then
+        tp = min(tp, h)
+      end if
+      b = tp - max(zeta, this%dis%bot(n))
+    end if
+    zone_thickness = max(b, ZONE_MINIMUM_THICKNESS)
+  end function swi_saturated_thickness
 
 end module GwfSwiModule

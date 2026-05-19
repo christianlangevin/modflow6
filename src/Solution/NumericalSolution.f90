@@ -2621,19 +2621,20 @@ contains
 
       itestmat = getunit()
       open (itestmat, file=trim(adjustl(fname)))
-      write (itestmat, *) 'NODE, RHS, AMAT FOLLOW'
+      write (itestmat, *) 'NODE, X, RHS, AMAT FOLLOW'
       do ieq = 1, this%neq
         irow_glo = ieq + this%matrix_offset
         icol_s = this%system_matrix%get_first_col_pos(irow_glo)
         icol_e = this%system_matrix%get_last_col_pos(irow_glo)
         write (itestmat, '(*(G0,:,","))') &
           irow_glo, &
+          this%xtemp(ieq), &
           this%rhs(ieq), &
           (this%system_matrix%get_column(ipos), ipos=icol_s, icol_e), &
           (this%system_matrix%get_value_pos(ipos), ipos=icol_s, icol_e)
       end do
       close (itestmat)
-      !stop
+      stop
     end if
     !-------------------------------------------------------
     !
