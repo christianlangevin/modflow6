@@ -70,12 +70,6 @@ jobs:
             optimization: 1
             extended: false
             xcode-version: '15.1.0'
-          - os: macos-15-intel
-            compiler: gcc
-            version: 13
-            optimization: 1
-            extended: false
-            xcode-version: '16.1.0'
           - os: windows-2022
             compiler: ${{ inputs.compiler_toolchain }}
             version: ${{ inputs.compiler_version }}
@@ -135,7 +129,7 @@ jobs:
           version: ${{ matrix.version }}
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.9.4
+        uses: prefix-dev/setup-pixi@v0.9.5
         with:
           pixi-version: v0.41.4
           manifest-path: "modflow6/pixi.toml"
@@ -479,7 +473,7 @@ jobs:
         run: sudo ./install.sh --all-users
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.9.4
+        uses: prefix-dev/setup-pixi@v0.9.5
         with:
           pixi-version: v0.41.4
           manifest-path: "modflow6/pixi.toml"
@@ -611,9 +605,6 @@ jobs:
           - os: macos-14
             compiler: gcc
             version: 13
-          - os: macos-15-intel
-            compiler: gcc
-            version: 13
           - os: windows-2022
             compiler: ${{ inputs.compiler_toolchain }}
             version: ${{ inputs.compiler_version }}
@@ -646,7 +637,7 @@ jobs:
           version: ${{ matrix.version }}
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.9.4
+        uses: prefix-dev/setup-pixi@v0.9.5
         with:
           pixi-version: v0.41.4
           manifest-path: "modflow6/pixi.toml"
@@ -721,6 +712,7 @@ jobs:
           if [[ "${{ inputs.releasemode }}" == "true" ]]; then
             zip -r $distname.zip \
               $distname/bin \
+              $distname/dfns \
               $distname/src \
               $distname/srcbmi \
               $distname/doc \
@@ -739,6 +731,7 @@ jobs:
           else
             zip -r $distname.zip \
               $distname/bin/* \
+              $distname/dfns \
               $distname/doc/mf6io.pdf \
               $distname/doc/release.pdf \
               $distname/code.json \
@@ -756,6 +749,7 @@ jobs:
           if [[ "${{ inputs.releasemode }}" == "true" ]]; then
             7z a -tzip $distname.zip \
               $distname/bin \
+              $distname/dfns \
               $distname/src \
               $distname/srcbmi \
               $distname/doc \
@@ -773,6 +767,7 @@ jobs:
           else
             7z a -tzip $distname.zip \
               $distname/bin/* \
+              $distname/dfns \
               $distname/doc/mf6io.pdf \
               $distname/doc/release.pdf \
               $distname/code.json \
@@ -787,6 +782,20 @@ jobs:
         with:
           name: "${{ needs.build.outputs.distname }}_${{ steps.ostag.outputs.ostag }}"
           path: "${{ needs.build.outputs.distname }}_${{ steps.ostag.outputs.ostag }}.zip"
+
+      - name: Create DFN asset
+        if: runner.os == 'Linux'
+        run: |
+          distname="${{ needs.build.outputs.distname }}_${{ steps.ostag.outputs.ostag }}"
+          cd "$distname/dfns"
+          zip -r "../../${{ needs.build.outputs.distname }}_dfns.zip" .
+
+      - name: Upload DFN asset
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: "${{ needs.build.outputs.distname }}_dfns"
+          path: "${{ needs.build.outputs.distname }}_dfns.zip"
 
       - name: Upload release notes
         if: runner.os == 'Linux'

@@ -19,10 +19,9 @@ modflow_sources = files(
     'Distributed' / 'VirtualDataContainer.f90',
     'Distributed' / 'VirtualDataLists.f90',
     'Distributed' / 'VirtualDataManager.f90',
-    'Distributed' / 'VirtualExchange.f90',    
-    'Distributed' / 'VirtualGweExchange.f90',
+    'Distributed' / 'VirtualExchange.f90',
     'Distributed' / 'VirtualGwfExchange.f90',
-    'Distributed' / 'VirtualGwtExchange.f90',
+    'Distributed' / 'VirtualTspExchange.f90',
     'Distributed' / 'VirtualModel.f90',
     'Distributed' / 'VirtualGweModel.f90',
     'Distributed' / 'VirtualGwfModel.f90',
@@ -32,6 +31,7 @@ modflow_sources = files(
     'Exchange' / 'DisConnExchange.f90',
     'Exchange' / 'GhostNode.f90',
     'Exchange' / 'GwfExchangeMover.f90',
+    'Exchange' / 'TspExchangeMover.f90',
     'Exchange' / 'NumericalExchange.f90',
     'Exchange' / 'exg-chfgwf.f90',
     'Exchange' / 'exg-gwfgwf.f90',
@@ -160,6 +160,10 @@ modflow_sources = files(
     'Idm' / 'prt-prpidm.f90',
     'Idm' / 'utl-hpcidm.f90',
     'Idm' / 'utl-ncfidm.f90',
+    'Idm' / 'utl-spcidm.f90',
+    'Idm' / 'utl-spcaidm.f90',
+    'Idm' / 'utl-tvkidm.f90',
+    'Idm' / 'utl-tvsidm.f90',
     'Idm' / 'selector' / 'IdmDfnSelector.f90',
     'Idm' / 'selector' / 'IdmExgDfnSelector.f90',
     'Idm' / 'selector' / 'IdmGweDfnSelector.f90',
@@ -352,16 +356,13 @@ modflow_sources = files(
     'Solution' / 'ParticleTracker' / 'Method' / 'MethodCell.f90',
     'Solution' / 'ParticleTracker' / 'Method' / 'MethodCellPollock.f90',
     'Solution' / 'ParticleTracker' / 'Method' / 'MethodCellPollockQuad.f90',
-    'Solution' / 'ParticleTracker' / 'Method' / 'MethodCellPool.f90',
     'Solution' / 'ParticleTracker' / 'Method' / 'MethodCellTernary.f90',
     'Solution' / 'ParticleTracker' / 'Method' / 'MethodModel.f90',
     'Solution' / 'ParticleTracker' / 'Method' / 'MethodDis.f90',
     'Solution' / 'ParticleTracker' / 'Method' / 'MethodDisv.f90',
-    'Solution' / 'ParticleTracker' / 'Method' / 'MethodPool.f90',
     'Solution' / 'ParticleTracker' / 'Method' / 'MethodCellPassToBot.f90',
     'Solution' / 'ParticleTracker' / 'Method' / 'MethodSubcell.f90',
     'Solution' / 'ParticleTracker' / 'Method' / 'MethodSubcellPollock.f90',
-    'Solution' / 'ParticleTracker' / 'Method' / 'MethodSubcellPool.f90',
     'Solution' / 'ParticleTracker' / 'Method' / 'MethodSubcellTernary.f90',
     'Solution' / 'ParticleTracker' / 'Method' / 'TernarySolveUtils.f90',
     'Solution' / 'ParticleTracker' / 'Particle' / 'Particle.f90',
@@ -381,6 +382,7 @@ modflow_sources = files(
     'Solution' / 'ParticleTracker' / 'Particle' / 'Events' / 'DroppedEvent.f90',
     'Timing' / 'ats.f90',
     'Timing' / 'tdis.f90',
+    'Timing' / 'AtsFactory.F90',
     'Utilities' / 'ArrayRead' / 'ArrayReaderBase.f90',
     'Utilities' / 'ArrayRead' / 'Double1dReader.f90',
     'Utilities' / 'ArrayRead' / 'Double2dReader.f90',
@@ -404,6 +406,7 @@ modflow_sources = files(
     'Utilities' / 'Idm' / 'mf6blockfile' / 'LoadMf6File.f90',
     'Utilities' / 'Idm' / 'mf6blockfile' / 'Mf6FileGridArray.f90',
     'Utilities' / 'Idm' / 'mf6blockfile' / 'Mf6FileLayerArray.f90',
+    'Utilities' / 'Idm' / 'mf6blockfile' / 'Mf6FileKeystring.f90',
     'Utilities' / 'Idm' / 'mf6blockfile' / 'Mf6FileList.f90',
     'Utilities' / 'Idm' / 'mf6blockfile' / 'Mf6FileSetting.f90',
     'Utilities' / 'Idm' / 'mf6blockfile' / 'Mf6FileStoInput.f90',
@@ -497,13 +500,12 @@ modflow_sources = files(
     'Utilities' / 'TableTerm.f90',
     'Utilities' / 'Timer.f90',
     'Utilities' / 'UtlTva.f90',
-    'Utilities' / 'version.f90',
     'mf6core.f90',
     'mf6lists.f90',
     'SimulationCreate.f90',
     'RunControl.f90',
     'RunControlFactory.F90'
-)
+) + [version_f90]
 
 modflow_petsc_sources = files(
   'Utilities' / 'Vector' / 'PetscVector.F90',
@@ -520,7 +522,8 @@ modflow_mpi_sources = files(
   'Distributed' / 'MpiRouter.f90',
   'Distributed' / 'MpiRunControl.F90',
   'Distributed' / 'MpiWorld.f90',
-  'Solution' / 'ParallelSolution.f90'
+  'Solution' / 'ParallelSolution.f90',
+  'Timing' / 'ParallelAts.f90'
 )
 
 modflow_netcdf_sources = files(
