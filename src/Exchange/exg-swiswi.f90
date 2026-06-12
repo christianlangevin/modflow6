@@ -398,12 +398,16 @@ contains
     real(DP) :: rterms
     real(DP) :: csat, q, dsfdhs, dssdhf, hfn, hfm, hsn, hsm
 
+    integer(I4B) :: icross_storage = 1
+    integer(I4B) :: icross_flow = 1
+
     ! -- TODO: these terms are Newton.  Should probably move to _fn
 
     ! If steady steady, then skip out
     if (this%gwf_fresh%iss == 1) return
 
     ! -- Put cross storage terms into amatsln and rhs
+    if (icross_storage == 1) then
     do n = 1, this%nexg
 
       iglo = n + this%gwf_fresh%moffset
@@ -425,10 +429,12 @@ contains
       rhs_sln(jglo) = rhs_sln(jglo) + rterms
 
     end do
+    end if
 
     ! FRESHWATER EQUATIONS
     ! go through each freshwater cell and evaluate effect of cross flow terms
     ! in connected saltwater cells
+    if (icross_flow == 1) then
     idx = 1
     do n = 1, this%gwf_fresh%dis%nodes
       iglo = n + this%gwf_fresh%moffset
@@ -553,6 +559,7 @@ contains
         idx = idx + 1
       end do
     end do
+    end if
 
     ! !
     ! ! -- Set inwt to exchange newton, but shut off if requested by caller
