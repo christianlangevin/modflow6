@@ -435,130 +435,132 @@ contains
     ! go through each freshwater cell and evaluate effect of cross flow terms
     ! in connected saltwater cells
     if (icross_flow == 1) then
-    idx = 1
-    do n = 1, this%gwf_fresh%dis%nodes
-      iglo = n + this%gwf_fresh%moffset
-      do ipos = this%gwf_fresh%dis%con%ia(n), this%gwf_fresh%dis%con%ia(n + 1) - 1
+      idx = 1
+      do n = 1, this%gwf_fresh%dis%nodes
+        iglo = n + this%gwf_fresh%moffset
+        do ipos = this%gwf_fresh%dis%con%ia(n), &
+          this%gwf_fresh%dis%con%ia(n + 1) - 1
 
-        ihc = this%gwf_fresh%npf%dis%con%ihc(this%gwf_fresh%npf%dis%con%jas(ipos))
-        if (ihc == C3D_VERTICAL) then
-          idx = idx + 1
-          cycle
-        end if
+          ihc = this%gwf_fresh%npf%dis%con%ihc( &
+                this%gwf_fresh%npf%dis%con%jas(ipos))
+          if (ihc == C3D_VERTICAL) then
+            idx = idx + 1
+            cycle
+          end if
 
-        m = this%gwf_fresh%dis%con%ja(ipos)
-        jglo = m + this%gwf_salt%moffset
+          m = this%gwf_fresh%dis%con%ja(ipos)
+          jglo = m + this%gwf_salt%moffset
 
-        termf = DZERO
-        rtermf = DZERO
-        hfn = this%gwf_fresh%x(n)
-        hfm = this%gwf_fresh%x(m)
-        csat = this%gwf_fresh%npf%condsat(this%gwf_fresh%npf%dis%con%jas(ipos))
-
-        if (hfm > hfn) then
-          ! Saltwater head in m affects n-m conductance so need to include derivative
-          ! term in freshwater equation
-          q = csat * (hfm - hfn)
-          dsfdhs = this%get_dsfdhs(m, 2)
-
-          ! amat contribution
-          termf = dsfdhs * q
-          idxglopos = this%idxglo(n)
-
-          ! rhs contribution
-          hsm = this%gwf_salt%x(m)
-          rtermf = termf * hsm
-
-          call matrix_sln%add_value_pos(this%idxjasalt(idx), termf)
-          rhs_sln(iglo) = rhs_sln(iglo) + rtermf
-
-        else
-
-          ! Saltwater head in n affects n-m conductance so need to include derivative
-          ! term in freshwater equation
-          q = csat * (hfm - hfn)
-          dsfdhs = this%get_dsfdhs(n, 2)
-
-          ! amat contribution
-          termf = dsfdhs * q
-
-          ! rhs contribution
-          hsn = this%gwf_salt%x(n)
-          rtermf = termf * hsn
-
-          call matrix_sln%add_value_pos(this%idxglo(n), termf)
-          rhs_sln(iglo) = rhs_sln(iglo) + rtermf
-
-        end if
-
-        ! increment counter for idx array
-        idx = idx + 1
-      end do
-    end do
-
-    ! SALTWATER EQUATIONS
-    ! go through each freshwater cell and evaluate effect of cross flow terms
-    ! in connected saltwater cells
-    idx = 1
-    do n = 1, this%gwf_salt%dis%nodes
-      iglo = n + this%gwf_salt%moffset
-      do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
-
-        ihc = this%gwf_salt%npf%dis%con%ihc(this%gwf_salt%npf%dis%con%jas(ipos))
-        if (ihc == C3D_VERTICAL) then
-          idx = idx + 1
-          cycle
-        end if
-
-        m = this%gwf_salt%dis%con%ja(ipos)
-        jglo = m + this%gwf_fresh%moffset
-
-        terms = DZERO
-        rterms = DZERO
-        hsn = this%gwf_salt%x(n)
-        hsm = this%gwf_salt%x(m)
-        csat = this%gwf_salt%npf%condsat(this%gwf_salt%npf%dis%con%jas(ipos))
-
-        if (hsm > hsn) then
-          ! Freshwater head in m affects n-m conductance so need to include derivative
-          ! term in saltwater equation
-          q = csat * (hsm - hsn)
-          dssdhf = this%get_dssdhf(m, 2)
-
-          ! amat contribution
-          terms = dssdhf * q
-          idxglopos = this%idxsymglo(n)
-
-          ! rhs contribution
-          hfm = this%gwf_fresh%x(m)
-          rterms = terms * hfm
-
-          call matrix_sln%add_value_pos(this%idxjafresh(idx), terms)
-          rhs_sln(iglo) = rhs_sln(iglo) + rterms
-
-        else
-
-          ! Saltwater head in n affects n-m conductance so need to include derivative
-          ! term in freshwater equation
-          q = csat * (hsm - hsn)
-          dssdhf = this%get_dssdhf(n, 2)
-
-          ! amat contribution
-          terms = dssdhf * q
-
-          ! rhs contribution
+          termf = DZERO
+          rtermf = DZERO
           hfn = this%gwf_fresh%x(n)
-          rterms = terms * hfn
+          hfm = this%gwf_fresh%x(m)
+          csat = this%gwf_fresh%npf%condsat(this%gwf_fresh%npf%dis%con%jas(ipos))
 
-          call matrix_sln%add_value_pos(this%idxsymglo(n), terms)
-          rhs_sln(iglo) = rhs_sln(iglo) + rterms
+          if (hfm > hfn) then
+            ! Saltwater head in m affects n-m conductance so need to include derivative
+            ! term in freshwater equation
+            q = csat * (hfm - hfn)
+            dsfdhs = this%get_dsfdhs(m, 2)
 
-        end if
+            ! amat contribution
+            termf = dsfdhs * q
+            idxglopos = this%idxglo(n)
 
-        ! increment counter for idx array
-        idx = idx + 1
+            ! rhs contribution
+            hsm = this%gwf_salt%x(m)
+            rtermf = termf * hsm
+
+            call matrix_sln%add_value_pos(this%idxjasalt(idx), termf)
+            rhs_sln(iglo) = rhs_sln(iglo) + rtermf
+
+          else
+
+            ! Saltwater head in n affects n-m conductance so need to include derivative
+            ! term in freshwater equation
+            q = csat * (hfm - hfn)
+            dsfdhs = this%get_dsfdhs(n, 2)
+
+            ! amat contribution
+            termf = dsfdhs * q
+
+            ! rhs contribution
+            hsn = this%gwf_salt%x(n)
+            rtermf = termf * hsn
+
+            call matrix_sln%add_value_pos(this%idxglo(n), termf)
+            rhs_sln(iglo) = rhs_sln(iglo) + rtermf
+
+          end if
+
+          ! increment counter for idx array
+          idx = idx + 1
+        end do
       end do
-    end do
+
+      ! SALTWATER EQUATIONS
+      ! go through each freshwater cell and evaluate effect of cross flow terms
+      ! in connected saltwater cells
+      idx = 1
+      do n = 1, this%gwf_salt%dis%nodes
+        iglo = n + this%gwf_salt%moffset
+        do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
+
+          ihc = this%gwf_salt%npf%dis%con%ihc(this%gwf_salt%npf%dis%con%jas(ipos))
+          if (ihc == C3D_VERTICAL) then
+            idx = idx + 1
+            cycle
+          end if
+
+          m = this%gwf_salt%dis%con%ja(ipos)
+          jglo = m + this%gwf_fresh%moffset
+
+          terms = DZERO
+          rterms = DZERO
+          hsn = this%gwf_salt%x(n)
+          hsm = this%gwf_salt%x(m)
+          csat = this%gwf_salt%npf%condsat(this%gwf_salt%npf%dis%con%jas(ipos))
+
+          if (hsm > hsn) then
+            ! Freshwater head in m affects n-m conductance so need to include derivative
+            ! term in saltwater equation
+            q = csat * (hsm - hsn)
+            dssdhf = this%get_dssdhf(m, 2)
+
+            ! amat contribution
+            terms = dssdhf * q
+            idxglopos = this%idxsymglo(n)
+
+            ! rhs contribution
+            hfm = this%gwf_fresh%x(m)
+            rterms = terms * hfm
+
+            call matrix_sln%add_value_pos(this%idxjafresh(idx), terms)
+            rhs_sln(iglo) = rhs_sln(iglo) + rterms
+
+          else
+
+            ! Saltwater head in n affects n-m conductance so need to include derivative
+            ! term in freshwater equation
+            q = csat * (hsm - hsn)
+            dssdhf = this%get_dssdhf(n, 2)
+
+            ! amat contribution
+            terms = dssdhf * q
+
+            ! rhs contribution
+            hfn = this%gwf_fresh%x(n)
+            rterms = terms * hfn
+
+            call matrix_sln%add_value_pos(this%idxsymglo(n), terms)
+            rhs_sln(iglo) = rhs_sln(iglo) + rterms
+
+          end if
+
+          ! increment counter for idx array
+          idx = idx + 1
+        end do
+      end do
     end if
 
     ! !
