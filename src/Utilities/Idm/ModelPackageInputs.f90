@@ -277,16 +277,20 @@ contains
     integer(I4B), dimension(:), allocatable :: cunit_idxs, indx
     character(len=LENPACKAGETYPE) :: ftype
     integer(I4B) :: n, m
-    logical(LGP) :: found
+    logical(LGP) :: found, has_dis
 
     ! allocate
     allocate (cunit_idxs(0))
+    has_dis = .false.
 
     ! identify input packages and check that each is supported
     do n = 1, size(ftypes)
       ! type from model nam file packages block
       ftype = ftypes(n)
       found = .false.
+
+      ! check for discretization package (any type starting with 'DIS')
+      if (ftype(1:3) == 'DIS') has_dis = .true.
 
       ! search supported types for this filetype
       do m = 1, this%niunit
@@ -316,6 +320,15 @@ contains
         call store_error_filename(this%modelfname)
       end if
     end do
+
+    ! check that a discretization package is specified
+    if (.not. has_dis) then
+      write (errmsg, '(3a)') &
+        'Discretization package not specified for model "', &
+        trim(this%modelname), '".'
+      call store_error(errmsg)
+      call store_error_filename(this%modelfname)
+    end if
 
     ! allocate the pkglist
     allocate (this%pkglist(size(cunit_idxs)))

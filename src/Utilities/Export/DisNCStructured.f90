@@ -1178,7 +1178,7 @@ contains
         ! timeseries
         call nf_verify(nf90_put_var(ncid, &
                                     var_ids%export, p_mem, &
-                                    start=(/1, kper/), &
+                                    start=(/1, 1, kper/), &
                                     count=(/dis%ncol, dis%nrow, 1/)), nc_fname)
       end if
 
@@ -1404,7 +1404,7 @@ contains
         ! timeseries
         call nf_verify(nf90_put_var(ncid, &
                                     var_ids%export, p_mem, &
-                                    start=(/1, kper/), &
+                                    start=(/1, 1, kper/), &
                                     count=(/dis%ncol, dis%nrow, 1/)), nc_fname)
       end if
 

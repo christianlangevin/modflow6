@@ -101,14 +101,10 @@ contains
         call freeunitnumber(iu)
       end if
       !
-      ! -- Check to see if file is already open, if not then open the file
+      ! -- Check if file is already open
       inquire (file=fname(1:iflen), number=iuop)
-      if (iuop > 0) then
-        ivar = -1
-      else
-        open (unit=iu, file=fname(1:iflen), form=fmtarg, access=accarg, &
-              status=filstat, action=filact, iostat=ivar)
-      end if
+      open (unit=iu, file=fname(1:iflen), form=fmtarg, access=accarg, &
+            status=filstat, action=filact, iostat=ivar)
       !
       ! -- Check for an error
       if (ivar /= 0) then
@@ -1721,6 +1717,7 @@ contains
     integer(I4B), intent(inout) :: status
     ! -- local
     integer(I8B) :: ipos
+    character(len=20) :: file_action
     !
     inquire (unit=iu, size=ipos)
     !
@@ -1741,8 +1738,15 @@ contains
       ipos = ipos + offset
     end select
     !
-    ! -- position the file pointer to ipos
-    write (iu, pos=ipos, iostat=status)
+    ! -- position the file pointer to ipos using read or write depending
+    !    on the file action, since write fails on read-only files and
+    !    read fails on write-only files
+    inquire (unit=iu, action=file_action)
+    if (trim(file_action) == 'READ') then
+      read (iu, pos=ipos, iostat=status)
+    else
+      write (iu, pos=ipos, iostat=status)
+    end if
     inquire (unit=iu, pos=ipos)
   end subroutine fseek_stream
 
