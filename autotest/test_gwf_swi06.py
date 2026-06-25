@@ -1,7 +1,21 @@
 """
-Test of the seawater intrusion (SWI) package for a sloping offshore ghb
-boundary.
+SWI Package test -- single-fluid (freshwater-only) sharp-interface model of a
+flat strip-island aquifer under a transient, rising sea level.
 
+Conceptual model: the same flat strip-island geometry as swi05 (1 row, 100
+columns, top +50 m, bottom -50 m, a GHB cell at each end, recharge everywhere),
+but run transient over 10 stress periods of 3,650 days each (100 years total).
+Sea level rises linearly from 0 to 40 m. The time-varying saltwater head is
+supplied through the SWI Package's TVA (time-varying array) subpackage as a
+SALTWATER_HEAD auxiliary variable, while the GHB heads track the same rising sea
+level. The Newton formulation is used.
+
+What check_output verifies: at every output time the simulated interface
+elevation zeta obeys the Ghyben-Herzberg relation
+zeta = clip(-40*head + 41*saltwater_head(t), botm, top) using that period's sea
+level (alphaf=40, alphas=41), the interface stays within the aquifer
+(botm <= zeta <= top), and the model's volumetric budget closes for all periods.
+This case also exercises the TVA subpackage and transient interface movement.
 """
 
 import flopy
@@ -143,8 +157,40 @@ def plot_output(idx, test):
 
 
 def check_output(idx, test):
-    # get the flopy sim object
     sim = test.sims[0]
+    gwf = sim.gwf[0]
+    ws = sim.sim_path
+
+    # time-varying saltwater head (sea level) imposed through the TVA subpackage
+    sl = np.linspace(sealevel_start, sealevel_stop, nper)
+    hobj = gwf.output.head()
+    zobj = gwf.swi.output.zeta()
+    times = hobj.times
+    assert len(times) == nper, f"expected {nper} output times, got {len(times)}"
+
+    # The interface must satisfy the Ghyben-Herzberg relation (alphaf=40,
+    # alphas=41) at every time, using the period's saltwater head, with the
+    # interface elevation constrained to the cell (botm <= zeta <= top).
+    for i, t in enumerate(times):
+        head = hobj.get_data(totim=t).flatten()
+        zeta = zobj.get_data(totim=t).flatten()
+        zeta_expected = np.clip(-40.0 * head + 41.0 * sl[i], botm_aquifer, top_island)
+        adiff = np.max(np.abs(zeta - zeta_expected))
+        print(f"period {i}: hsalt={sl[i]:.3f} max|zeta-exp|={adiff:.2e}")
+        assert np.allclose(zeta, zeta_expected, atol=1.0e-4), (
+            f"period {i}: zeta does not satisfy the Ghyben-Herzberg relation; "
+            f"max diff {adiff}"
+        )
+        assert np.all(zeta >= botm_aquifer - 1.0e-6), "zeta below aquifer bottom"
+        assert np.all(zeta <= top_island + 1.0e-6), "zeta above aquifer top"
+
+    # the global volumetric budget must close for all periods
+    from flopy.utils import Mf6ListBudget
+
+    flux, vol = Mf6ListBudget(ws / "mymodel.lst").get_budget()
+    pd = flux["PERCENT_DISCREPANCY"]
+    print(f"percent_discrepancy={pd}")
+    assert np.all(np.abs(pd) < 1.0e-2), f"budget discrepancy too large: {pd}"
 
 
 @pytest.mark.developmode

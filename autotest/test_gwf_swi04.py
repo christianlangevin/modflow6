@@ -1,7 +1,21 @@
 """
-Test of the seawater intrusion (SWI) package for a sloping offshore ghb
-boundary.
+SWI Package test -- single-fluid (freshwater-only) sharp-interface model of a
+coastal aquifer with a sloping offshore sea floor.
 
+Conceptual model: a 1-row, 100-column cross section 10 km long. The cell top
+slopes from -20 m (deep, at the seaward/left edge) up to -1 m at the coastline
+(x = 3000 m), then steps up to +10 m for the onshore island; the aquifer bottom
+is at -200 m. The sea is represented by depth-dependent GHB cells over the
+submarine portion (x < coastline), and freshwater recharge is applied
+everywhere. The SWI Package runs in single-fluid mode with a fixed saltwater
+head, and the Newton formulation is used. The two cases differ only in the
+saltwater head (sea level): 0.0 and 1.0.
+
+What check_output verifies: the simulated interface elevation zeta obeys the
+Ghyben-Herzberg relation zeta = clip(-40*head + 41*saltwater_head, botm, top) at
+every cell (alphaf=40, alphas=41), the interface stays within the aquifer
+(botm <= zeta <= top), and the model's volumetric budget closes (percent
+discrepancy ~ 0).
 """
 
 import flopy
@@ -144,8 +158,37 @@ def plot_output(idx, test):
 
 
 def check_output(idx, test):
-    # get the flopy sim object
     sim = test.sims[0]
+    gwf = sim.gwf[0]
+    ws = sim.sim_path
+    h0 = saltwater_head[idx]
+
+    head = gwf.output.head().get_data().flatten()
+    zeta = gwf.swi.output.zeta().get_data().flatten()
+    topf = top.flatten()
+    print(f"head={head}")
+    print(f"zeta={zeta}")
+
+    # The interface must satisfy the Ghyben-Herzberg relation (alphaf=40,
+    # alphas=41) with the interface elevation constrained to the cell
+    # (botm <= zeta <= top).
+    zeta_expected = np.clip(-40.0 * head + 41.0 * h0, botm_aquifer, topf)
+    assert np.allclose(zeta, zeta_expected, atol=1.0e-4), (
+        f"zeta does not satisfy the Ghyben-Herzberg relation; "
+        f"max diff {np.max(np.abs(zeta - zeta_expected))}"
+    )
+
+    # the interface must remain within the aquifer
+    assert np.all(zeta >= botm_aquifer - 1.0e-6), "zeta below aquifer bottom"
+    assert np.all(zeta <= topf + 1.0e-6), "zeta above aquifer top"
+
+    # the global volumetric budget must close
+    from flopy.utils import Mf6ListBudget
+
+    flux, vol = Mf6ListBudget(ws / "mymodel.lst").get_budget()
+    pd = flux["PERCENT_DISCREPANCY"]
+    print(f"percent_discrepancy={pd}")
+    assert np.all(np.abs(pd) < 1.0e-3), f"budget discrepancy too large: {pd}"
 
 
 @pytest.mark.developmode
