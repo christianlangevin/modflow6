@@ -9,6 +9,7 @@ import pathlib as pl
 
 import flopy
 import numpy as np
+import pandas as pd
 import pytest
 from framework import TestFramework
 
@@ -99,6 +100,7 @@ def build_models(idx, test):
     oc = flopy.mf6.ModflowGwfoc(
         gwf,
         budget_filerecord=budget_file,
+        budgetcsv_filerecord=name + ".bud.csv",
         head_filerecord=head_file,
         saverecord=[("HEAD", "ALL"), ("BUDGET", "ALL")],
         printrecord=[("HEAD", "ALL"), ("BUDGET", "ALL")],
@@ -146,6 +148,15 @@ def check_output(idx, test):
     for j in range(head.shape[0]):
         print(j, head[j], zeta[j], zeta_answer[j])
     assert np.allclose(zeta, zeta_answer), f"zeta is not right {zeta} /= {zeta_answer}"
+
+    # the model budget must conserve mass (absolute imbalance relative to peak
+    # flow rather than the per-step PERCENT_DIFFERENCE)
+    df = pd.read_csv(ws / f"{gwf.name}.bud.csv")
+    imbalance = (df["TOTAL_IN"] - df["TOTAL_OUT"]).abs().max()
+    peak = max(df["TOTAL_IN"].max(), df["TOTAL_OUT"].max())
+    tol = 1.0e-6 + 1.0e-4 * peak
+    print(f"{gwf.name}: max|imbalance|={imbalance:.3e} peak={peak:.3e} tol={tol:.3e}")
+    assert imbalance < tol, f"budget does not conserve mass (imbalance={imbalance:.3e})"
 
 
 @pytest.mark.developmode
