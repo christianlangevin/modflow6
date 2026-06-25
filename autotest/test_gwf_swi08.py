@@ -16,6 +16,7 @@ import pathlib as pl
 
 import flopy
 import numpy as np
+import pandas as pd
 import pytest
 from framework import TestFramework
 
@@ -92,6 +93,7 @@ def build_gwf_model(idx, sim, is_saltwater):
     oc = flopy.mf6.ModflowGwfoc(
         gwf,
         budget_filerecord=budget_file,
+        budgetcsv_filerecord=name + ".bud.csv",
         head_filerecord=head_file,
         saverecord=[("HEAD", "ALL"), ("BUDGET", "ALL")],
         printrecord=[("HEAD", "ALL"), ("BUDGET", "ALL")],
@@ -203,6 +205,20 @@ def check_output(idx, test):
         f"salt zeta not equal fresh zeta {zeta_s} /= {zeta}"
     )
     # assert np.allclose(head_s, 0), f"salt head is not zero {head_s}"
+
+    # both model budgets must conserve mass. Check the absolute imbalance
+    # (TOTAL_IN - TOTAL_OUT) relative to the peak flow rather than the per-step
+    # PERCENT_DIFFERENCE, which is meaningless at the many near-zero-flow steps
+    # of the quasi-static saltwater model.
+    for nam in (gwf_fresh.name, gwf_salt.name):
+        df = pd.read_csv(ws / f"{nam}.bud.csv")
+        imbalance = (df["TOTAL_IN"] - df["TOTAL_OUT"]).abs().max()
+        peak = max(df["TOTAL_IN"].max(), df["TOTAL_OUT"].max())
+        tol = 1.0e-6 + 1.0e-4 * peak
+        print(f"{nam}: max|imbalance|={imbalance:.3e} peak={peak:.3e} tol={tol:.3e}")
+        assert imbalance < tol, (
+            f"{nam} budget does not conserve mass (imbalance={imbalance:.3e})"
+        )
 
 
 @pytest.mark.developmode
