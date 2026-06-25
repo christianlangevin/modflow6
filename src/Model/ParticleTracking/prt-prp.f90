@@ -60,7 +60,8 @@ module PrtPrpModule
     real(DP), pointer :: stoptraveltime => null() !< stop travel time for all points
     ! members
     type(PrtFmiType), pointer :: fmi => null() !< flow model interface
-    type(ParticleStoreType), pointer :: particles => null() !< particle store
+    type(ParticleStoreType), pointer :: particles => null() !< committed particle state (end of last successful time step)
+    type(ParticleStoreType), pointer :: particles_staging => null() !< staging particle state for the current solve attempt
     type(ParticleReleaseScheduleType), pointer :: schedule => null() !< particle release schedule
     integer(I4B), pointer :: nreleasepoints => null() !< number of release points
     integer(I4B), pointer :: nreleasetimes => null() !< number of user-specified particle release times
@@ -82,6 +83,7 @@ module PrtPrpModule
     procedure :: bnd_rp => prp_rp
     procedure :: bnd_cq_simrate => prp_cq_simrate
     procedure :: bnd_da => prp_da
+    procedure :: prp_commit
     procedure :: define_listlabel
     procedure :: prp_set_pointers
     procedure :: source_options => prp_options
@@ -233,8 +235,10 @@ contains
 
     ! Deallocate objects
     call this%particles%destroy(this%memoryPath)
+    call this%particles_staging%destroy(trim(this%memoryPath)//'-STAGING')
     call this%schedule%destroy()
     deallocate (this%particles)
+    deallocate (this%particles_staging)
     deallocate (this%schedule)
   end subroutine prp_da
 
@@ -259,12 +263,13 @@ contains
 
     call this%BndExtType%allocate_arrays()
 
-    ! Allocate particle store, starting with the number
-    ! of release points (arrays resized if/when needed)
+    ! Allocate particle stores
     call create_particle_store( &
-      this%particles, &
-      this%nreleasepoints, &
+      this%particles, 0, &
       this%memoryPath)
+    call create_particle_store( &
+      this%particles_staging, 0, &
+      trim(this%memoryPath)//'-STAGING')
 
     ! Allocate arrays
     call mem_allocate(this%rptx, this%nreleasepoints, 'RPTX', this%memoryPath)
@@ -430,6 +435,15 @@ contains
     ! Coincident release times are merged to
     ! a single time by the release scheduler.
 
+    ! Reset staging from committed state for this solve attempt.
+    if (.not. this%fmi%flows_from_file) then
+      call this%particles_staging%resize( &
+        this%particles%num_stored(), &
+        trim(this%memoryPath)//'-STAGING')
+      call this%particles_staging%copy_from(this%particles)
+      this%nparticles = this%particles%num_stored()
+    end if
+
     ! Reset mass accumulators for this time step.
     do ip = 1, this%nreleasepoints
       this%rptm(ip) = DZERO
@@ -455,12 +469,12 @@ contains
     ! Log the schedule to the list file.
     call this%log_release()
 
-    ! Expand the particle store. We know from the
+    ! Expand the staging store. We know from the
     ! schedule how many particles will be released.
-    call this%particles%resize( &
-      this%particles%num_stored() + &
+    call this%particles_staging%resize( &
+      this%particles_staging%num_stored() + &
       (this%nreleasepoints * this%schedule%count()), &
-      this%memoryPath)
+      trim(this%memoryPath)//'-STAGING')
 
     ! Release a particle from each point for
     ! each release time in the current step.
@@ -486,6 +500,15 @@ contains
       end do
     end do
   end subroutine prp_ad
+
+  !> @brief Commit staged particle state to the "final" store.
+  subroutine prp_commit(this)
+    class(PrtPrpType) :: this
+    call this%particles%resize( &
+      this%particles_staging%num_stored(), &
+      this%memoryPath)
+    call this%particles%copy_from(this%particles_staging)
+  end subroutine prp_commit
 
   !> @brief No-op AD method override for exchange PRP.
   subroutine exg_prp_ad(this)
@@ -592,7 +615,7 @@ contains
     call this%initialize_particle(particle, ip, trelease)
     np = this%nparticles + 1
     this%nparticles = np
-    call this%particles%put(particle, np)
+    call this%particles_staging%put(particle, np)
     deallocate (particle)
     this%rptm(ip) = this%rptm(ip) + DONE ! TODO configurable mass
 
@@ -605,10 +628,10 @@ contains
     integer(I4B), intent(in) :: ip !< particle index
     real(DP), intent(in) :: trelease !< release time
     ! local
+    logical(LGP) :: draped
     integer(I4B) :: irow, icol, ilay, icpl
     integer(I4B) :: ic, icu, ic_old
     real(DP) :: x, y, z
-    real(DP) :: top, bot, hds
     ! formats
     character(len=*), parameter :: fmticterr = &
       "('Error in ',a,': Flow model interface does not contain ICELLTYPE. &
@@ -617,7 +640,6 @@ contains
       &Make sure a GWFGRID entry is configured in the PRT FMI package.')"
 
     ic = this%rptnode(ip)
-    icu = this%dis%get_nodeuser(ic)
 
     call create_particle(particle)
 
@@ -631,25 +653,18 @@ contains
     particle%istopweaksink = this%istopweaksink
     particle%istopzone = this%istopzone
     particle%idrymeth = this%idrymeth
-    particle%icu = icu
-
-    select type (dis => this%dis)
-    type is (DisType)
-      call get_ijk(icu, dis%nrow, dis%ncol, dis%nlay, irow, icol, ilay)
-    type is (DisvType)
-      call get_jk(icu, dis%ncpl, dis%nlay, icpl, ilay)
-    end select
-    particle%ilay = ilay
-    particle%izone = this%rptzone(ic)
     particle%istatus = 0 ! status 0 until tracking starts
+
     ! If the cell is inactive, either drape the particle
     ! to the top-most active cell beneath it if drape is
     ! enabled, or else terminate permanently unreleased.
+    draped = .false.
     if (this%ibound(ic) == 0) then
       ic_old = ic
       if (this%drape) then
         call this%dis%highest_active(ic, this%ibound)
-        if (ic == ic_old .or. this%ibound(ic) == 0) then
+        draped = ic /= ic_old
+        if (.not. draped .and. this%ibound(ic) == 0) then
           ! negative unreleased status signals to the
           ! tracking method that we haven't yet saved
           ! a termination record, it needs to do so.
@@ -660,35 +675,35 @@ contains
       end if
     end if
 
-    ! load coordinates
-    x = this%rptx(ip)
-    y = this%rpty(ip)
-    if (this%localz) then
-      ! make sure FMI has cell type array. we need
-      ! it to distinguish convertible and confined
-      ! cells if release z coordinates are local
-      if (this%fmi%igwfceltyp /= 1) then
-        write (errmsg, fmticterr) trim(this%text)
-        call store_error(errmsg, terminate=.TRUE.)
-      end if
+    icu = this%dis%get_nodeuser(ic)
+    particle%icu = icu
+    select type (dis => this%dis)
+    type is (DisType)
+      call get_ijk(icu, dis%nrow, dis%ncol, dis%nlay, irow, icol, ilay)
+    type is (DisvType)
+      call get_jk(icu, dis%ncpl, dis%nlay, icpl, ilay)
+    end select
+    particle%ilay = ilay
+    particle%izone = this%rptzone(ic)
 
-      ! calculate model z coord from local z coord.
-      ! if cell is confined (icelltype == 0) use the
-      ! actual cell height (geometric top - bottom).
-      ! otherwise use head as cell top, clamping to
-      ! the cell bottom if head is below the bottom
-      ! and to geometric cell top if head is above top
-      top = this%fmi%dis%top(ic)
-      bot = this%fmi%dis%bot(ic)
-      if (this%fmi%gwfceltyp(icu) /= 0) then
-        hds = this%fmi%gwfhead(ic)
-        top = min(top, hds)
-        top = max(top, bot)
-      end if
-      z = bot + this%rptz(ip) * (top - bot)
+    ! if the particle was draped to this cell, set the z coord to
+    ! the effective top of the cell. if it was not draped, and is
+    ! a local z coord, calculate the corresponding model z coord.
+    if (draped) then
+      z = this%fmi%dis%bot(ic) + &
+          this%fmi%gwfsat(ic) * &
+          (this%fmi%dis%top(ic) - this%fmi%dis%bot(ic))
+    else if (this%localz) then
+      z = this%fmi%dis%bot(ic) + &
+          this%rptz(ip) * &
+          this%fmi%gwfsat(ic) * &
+          (this%fmi%dis%top(ic) - this%fmi%dis%bot(ic))
     else
       z = this%rptz(ip)
     end if
+
+    x = this%rptx(ip)
+    y = this%rpty(ip)
 
     if (this%ichkmeth > 0) &
       call this%validate_release_point(ic, x, y, z)
@@ -743,13 +758,12 @@ contains
         (ionper > nper) .and. &
         size(this%schedule%time_select%times) == 0) then
       ! If the user hasn't provided any release settings (neither
-      ! explicit release times, release time frequency, or period
+      ! explicit release times, release time frequency, nor period
       ! block release settings), default to a single release at the
-      ! start of the first period's first time step.
-      ! Store default configuration; advance() will be called in prp_ad().
-      if (allocated(this%period_block_lines)) deallocate (this%period_block_lines)
-      allocate (this%period_block_lines(1))
-      this%period_block_lines(1) = "FIRST"
+      ! start of the simulation (t=0). Add t=0 directly to the time
+      ! selection rather than time step selection because the latter
+      ! would fill forward, releasing at the start of every period.
+      call this%schedule%time_select%extend([DZERO])
       return
     else if (iper /= kper) then
       return
