@@ -74,9 +74,10 @@ module GwfStoModule
     procedure, private :: source_data
     procedure, private :: log_options
     procedure, private :: save_old_ss_sy
-    procedure, private :: fc_default_sto
-    procedure, private :: fn_default_sto
-    procedure, private :: cq_default_sto
+    ! public so "default + correction" formulations (e.g. SWI) can reuse them
+    procedure :: fc_default_sto
+    procedure :: fn_default_sto
+    procedure :: cq_default_sto
 
   end type
 
