@@ -402,16 +402,17 @@ contains
     type(GwfNpfType) :: npf
     type(GwfStoType) :: sto
     ! local variables
-    real(DP) :: dssdh
     !
-    dssdh = -this%alphaf ! derivative of saltwater saturation with respect to freshwater head
-    if (this%isaltwater == 1) dssdh = this%alphas ! derivative of saltwater saturation with respect to saltwater head
+    ! SPIKE: horizontal freshwater flow Newton is now filled by the
+    ! SwiNpfFormulationType flow formulation (swinpf_fn, dispatched from npf_fn),
+    ! not the npf_fn_swi correction (mirrors the commented npf_fc_swi in swi_fc).
+    ! dssdh = -this%alphaf                        ! d(salt saturation)/d(fresh head)
+    ! if (this%isaltwater == 1) dssdh = this%alphas
+    ! call npf_fn_swi(npf, kiter, matrix_sln, idxglo, rhs, hnew, &
+    !                 this%zeta, dssdh, this%isaltwater)
     !
-    call npf_fn_swi(npf, kiter, matrix_sln, idxglo, rhs, hnew, &
-                    this%zeta, dssdh, this%isaltwater)
-    !
-    ! Storage Newton terms are now assembled by the SWI STO formulation
-    ! (swisto_fn), dispatched from sto_fn for the flagged SWI_STORAGE cells.
+    ! Storage Newton terms are assembled by the SWI STO formulation (swisto_fn),
+    ! dispatched from sto_fn for the flagged SWI_STORAGE cells.
 
   end subroutine swi_fn
 
