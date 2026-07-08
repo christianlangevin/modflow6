@@ -95,8 +95,6 @@ module GwfSwiModule
     procedure, private :: allocate_arrays
     procedure, private :: source_griddata
     procedure, private :: update_zeta
-    procedure, private :: swi_fc_storage
-    procedure, private :: swi_fn_storage
     procedure, public :: swi_saturated_thickness
 
     procedure :: set_configuration
@@ -121,10 +119,12 @@ module GwfSwiModule
     procedure :: cq => swinpf_cq
   end type SwiNpfFormulationType
 
-  !> @brief STO storage formulation for SWI (spike: provides the SWI storage
-  !! budget term and cell-by-cell flows via bd/save_flows. The storage matrix
-  !! fill (fc/fn/cq) is still done by the existing swi_fc_storage path for now,
-  !! so no cells are flagged SWI_STORAGE and fc/fn/cq are not dispatched here.)
+  !> @brief STO storage formulation for SWI (single-fluid freshwater). Assembles
+  !! the freshwater storage as the water column (S^w, via the STO default) minus
+  !! the salt column (S^s): fc fills the residual-consistent terms, fn adds the
+  !! smoothed interface tangent, and cq/bd/save_flows report the water storage plus
+  !! the SWI storage budget term (the fresh<->salt conversion volume). Dispatched
+  !! from sto_fc/fn/cq for cells flagged SWI_STORAGE in swi_ar.
   !<
   type, extends(GwfStoFormulationType) :: SwiStoFormulationType
     class(GwfSwiType), pointer :: swi => null() !< owning SWI package
@@ -390,217 +390,6 @@ contains
     return
   end subroutine swi_fc
 
-  !> @ brief Calculate fresh storage terms
-  !<
-  subroutine swi_fc_storage(this, kiter, hold, hnew, matrix_sln, idxglo, &
-                            rhs, sto, inwt, isaltwater)
-    ! modules
-    use TdisModule, only: delt
-    use GwfStorageUtilsModule, only: SsCapacity, SyCapacity, SsTerms, SyTerms
-    !
-    class(GwfStoType) :: sto
-    ! dummy variables
-    class(GwfSwiType) :: this !< GwfSwiType object
-    integer(I4B), intent(in) :: kiter !< outer iteration number
-    real(DP), intent(in), dimension(:) :: hold !< previous heads
-    real(DP), intent(in), dimension(:) :: hnew !< current heads
-    class(MatrixBaseType), pointer :: matrix_sln !< A matrix
-    integer(I4B), intent(in), dimension(:) :: idxglo !< global index model to solution
-    real(DP), intent(inout), dimension(:) :: rhs !< right-hand side
-    integer(I4B) :: inwt, isaltwater
-    ! local variables
-    integer(I4B) :: n
-    integer(I4B) :: idiag
-    real(DP) :: tled
-    real(DP) :: sc1
-    real(DP) :: sc2
-    real(DP) :: rho1
-    real(DP) :: rho2
-    real(DP) :: sc1old
-    real(DP) :: sc2old
-    real(DP) :: rho1old
-    real(DP) :: rho2old
-    real(DP) :: tp
-    real(DP) :: bt
-    real(DP) :: snold
-    real(DP) :: snnew
-    real(DP) :: aterm
-    real(DP) :: rhsterm
-    real(DP) :: zetanew
-    real(DP) :: zetaold
-
-    ! set variables
-    tled = DONE / delt
-
-    ! Calculate storage terms for freshwater model by subtracting out saltwater side
-    do n = 1, this%dis%nodes
-
-      ! initialize
-      this%hcof(n) = DZERO
-      this%rhs(n) = DZERO
-
-      if (this%ibound(n) < 1) cycle
-
-      ! calculate zetanew and zetaold
-      zetanew = this%get_zetanew(n)
-      zetaold = this%get_zetaold(n)
-
-      ! aquifer elevations and thickness
-      tp = this%dis%top(n)
-      bt = this%dis%bot(n)
-
-      ! aquifer saturation
-      if (isaltwater == 0) then
-        ! Freshwater model, freshwater saturation is considered to be 1
-        ! if iconvert == 0, otherwise old and new saturation are calculated
-        ! using the old and new head values.  In this case snnew and snold
-        ! are the total saturated cell fractions.
-        if (sto%iconvert(n) == 0) then
-          snold = DONE
-          snnew = DONE
-        else
-          snold = sQuadraticSaturation(tp, bt, hold(n), sto%satomega)
-          snnew = sQuadraticSaturation(tp, bt, hnew(n), sto%satomega)
-        end if
-      else
-        ! Saltwater model, calculate old and new saturations using the
-        ! old and new zeta values. In this case snnew and snold
-        ! are the saltwater saturated cell fractions.
-        snold = sQuadraticSaturation(tp, bt, zetaold, sto%satomega)
-        snnew = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
-      end if
-
-      ! storage coefficients
-      sc1 = SsCapacity(sto%istor_coef, tp, bt, this%dis%area(n), sto%ss(n))
-      rho1 = sc1 * tled
-
-      ! Handle time-varying storage case
-      if (sto%integratechanges /= 0) then
-        ! Integration of storage changes (e.g. when using TVS):
-        !    separate the old (start of time step) and new (end of time step)
-        !    primary storage capacities
-        sc1old = SsCapacity(sto%istor_coef, tp, bt, this%dis%area(n), &
-                            this%oldss(n))
-        rho1old = sc1old * tled
-      else
-        ! No integration of storage changes: old and new values are
-        !    identical => normal MF6 storage formulation
-        rho1old = rho1
-      end if
-
-      ! calculate specific storage terms
-      call SsTerms(sto%iconvert(n), sto%iorig_ss, sto%iconf_ss, tp, bt, &
-                   rho1, rho1old, snnew, snold, hnew(n), hold(n), &
-                   aterm, rhsterm)
-
-      ! scale down the saltwater part
-      ! THIS APPEARS TO RECALCULATE THE SALTWATER FRACTION OF THE CELL
-      ! IN SNNEW.  THEN THE HCOF AND RHS TERMS ARE MULTIPLIED BY THIS
-      ! SALTWATER FRACTION.  FOR THE FRESHWATER MODEL, THE COMPRESSIBLE
-      ! STORAGE CHANGE IS SUBTRACTED AS IT IS A CORRECTION.  FOR THE
-      ! SALTWATER MODEL, WHICH IS NOT TREATED AS A CORRECTION, THE ENTIRE
-      ! COMPRESSIBLE STORAGE CHANGE IS ADDED TO HCOF AND RHS.
-      ! IS IT OKAY TO USE A FULLY FORWARD-WEIGHTED SNNEW HERE FOR THE
-      ! SALTWATER FRACTION OR SHOULD IT BE TIME AVERAGED?
-      snnew = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
-      aterm = aterm * snnew
-      rhsterm = rhsterm * snnew
-
-      ! add specific storage terms to amat and rhs -
-      ! subtract out aterm and rhsterm from the saltwater zone for freshwater
-      if (isaltwater == 1) then
-        ! If this is saltwater rmodel, then flip sign on aterm and rhsterm
-        aterm = -aterm
-        rhsterm = -rhsterm
-      end if
-      idiag = this%dis%con%ia(n)
-      call matrix_sln%add_value_pos(idxglo(idiag), -aterm)
-      rhs(n) = rhs(n) - rhsterm
-
-      ! THIS IS WHERE THERE WAS LIKELY A BUG IN THE IMPLEMENTATION.  HERE WE SEE THAT THE SY
-      ! CONTRIBUTION IS ONLY APPLIED FOR ICONVERT /= 0.  HOWEVER, WE STILL NEED
-      ! TO APPLY AN SY PART EVEN IF ICONVERT == 0 TO HANDLE FOR STORAGE CHANGES
-      ! RESULTING FROM CHANGE IN THE ZETA ELEVATION.  COMMENTING OUT THIS IF STATEMENT
-      ! SO THAT THE SY CONTRIBUTION IS ALWAYS APPLIED.
-      ! specific yield
-      ! cdl -- if (sto%iconvert(n) /= 0) then
-      rhsterm = DZERO
-
-      ! calculate the saltwater new and old saturations
-      snold = sQuadraticSaturation(tp, bt, zetaold, sto%satomega)
-      snnew = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
-
-      ! secondary storage coefficient
-      sc2 = SyCapacity(this%dis%area(n), this%sy(n))
-      rho2 = sc2 * tled
-
-      if (sto%integratechanges /= 0) then
-        ! Integration of storage changes (e.g. when using TVS):
-        ! separate the old (start of time step) and new (end of time step)
-        ! secondary storage capacities
-        sc2old = SyCapacity(this%dis%area(n), this%oldsy(n))
-        rho2old = sc2old * tled
-      else
-        ! No integration of storage changes: old and new values are
-        ! identical => normal MF6 storage formulation
-        rho2old = rho2
-      end if
-
-      ! Calculate specific yield terms from bot to zeta. This will
-      ! represent the change in storage due to change in zeta elevation.
-      ! This storage term needs to occur for both iconvert == 0 and iconvert /= 0
-      if (inwt /= 0) then
-        call SyTerms(tp, bt, rho2, rho2old, snnew, snold, &
-                     aterm, rhsterm)
-
-        ! add specific yield terms to amat and rhs -
-        ! subtract out aterm and rhsterm from the saltwater zone for freshwater
-
-        ! THEREFORE, for saltwater, flip sign on aterm and rhsterm
-        if (isaltwater == 1) then
-          aterm = -aterm
-          rhsterm = -rhsterm
-        end if
-
-        idiag = this%dis%con%ia(n)
-        call matrix_sln%add_value_pos(idxglo(idiag), -aterm)
-        rhs(n) = rhs(n) - rhsterm
-      else
-        !
-        rho2 = -rho2 * this%alphaf
-        rho2old = -rho2old * this%alphaf
-        ! add specific yield terms to hcof and rhs -
-        ! subtract out terms from the saltwater zone for freshwater
-        !
-        ! THEREFORE, for saltwater, flip sign on terms
-        if (isaltwater == 1) then
-          rho2 = -rho2
-          rho2old = -rho2old
-        end if
-        !-------------------------------------------------------------
-        if (zetanew > this%dis%bot(n) .and. zetaold > this%dis%bot(n)) then
-          ! new and old zeta above bottom
-          this%hcof(n) = rho2
-          this%rhs(n) = rho2 * hold(n)
-        else if (zetanew > this%dis%bot(n) .and. zetaold < this%dis%bot(n)) then
-          ! zetanew above bottom but zetaold is not
-          this%hcof(n) = rho2
-          this%rhs(n) = -rho2 * this%dis%bot(n) / this%alphaf
-        else if (zetanew < this%dis%bot(n) .and. zetaold > this%dis%bot(n)) then
-          ! zetanew is below bottom, zetaold above bottom
-          this%hcof(n) = DZERO
-          this%rhs(n) = rho2 * (this%dis%bot(n) / this%alphaf + hold(n))
-        end if
-      end if
-      !
-      ! cdl -- end if
-      !
-    end do
-    !
-    ! return
-    return
-  end subroutine swi_fc_storage
-
   subroutine swi_fn(this, kiter, matrix_sln, idxglo, rhs, hnew, hold, npf, sto)
     ! dummy
     class(GwfSwiType) :: this
@@ -625,137 +414,6 @@ contains
     ! (swisto_fn), dispatched from sto_fn for the flagged SWI_STORAGE cells.
 
   end subroutine swi_fn
-
-  !> @ brief Calculate fresh storage terms
-  !<
-  subroutine swi_fn_storage(this, kiter, hold, hnew, matrix_sln, idxglo, &
-                            rhs, sto, dssdh, isaltwater)
-    ! modules
-    use TdisModule, only: delt
-    use GwfStorageUtilsModule, only: SsCapacity, SyCapacity, SsTerms, SyTerms
-    !
-    class(GwfStoType) :: sto
-    ! dummy variables
-    class(GwfSwiType) :: this !< GwfSwiType object
-    integer(I4B), intent(in) :: kiter !< outer iteration number
-    real(DP), intent(in), dimension(:) :: hold !< previous heads
-    real(DP), intent(in), dimension(:) :: hnew !< current heads
-    class(MatrixBaseType), pointer :: matrix_sln !< A matrix
-    integer(I4B), intent(in), dimension(:) :: idxglo !< global index model to solution
-    real(DP), intent(inout), dimension(:) :: rhs !< right-hand side
-    integer(I4B), intent(in) :: isaltwater !< index for saltwater equation
-    real(DP) :: dssdh
-    ! local variables
-    integer(I4B) :: n
-    integer(I4B) :: idiag
-    real(DP) :: tled
-    real(DP) :: sc1
-    real(DP) :: sc2
-    real(DP) :: rho1
-    real(DP) :: rho2
-    real(DP) :: tp
-    real(DP) :: bt
-    real(DP) :: tthk
-    real(DP) :: h
-    real(DP) :: snnew
-    real(DP) :: derv
-    real(DP) :: rterm
-    real(DP) :: drterm
-    real(DP) :: zetanew
-    real(DP) :: zetaold
-    ! real(DP) :: sew,dereps
-    !
-    ! set variables
-    tled = DONE / delt
-    !
-    ! loop through and calculate storage contribution to hcof and rhs
-    do n = 1, this%dis%nodes
-      idiag = this%dis%con%ia(n)
-      if (this%ibound(n) <= 0) cycle
-      !
-      ! calculate zetanew and zetaold
-      zetanew = this%get_zetanew(n)
-      zetaold = this%get_zetaold(n)
-      !
-      ! aquifer elevations and thickness
-      tp = this%dis%top(n)
-      bt = this%dis%bot(n)
-      tthk = tp - bt
-      h = hnew(n)
-      !
-      ! aquifer saturation
-      snnew = sQuadraticSaturation(tp, bt, zetanew)
-      !
-      ! storage coefficients
-      sc1 = SsCapacity(sto%istor_coef, tp, bt, this%dis%area(n), sto%ss(n))
-      sc2 = SyCapacity(this%dis%area(n), this%sy(n))
-      rho1 = sc1 * tled
-      rho2 = sc2 * tled
-      !
-      ! calculate newton terms for specific storage
-      !    and specific yield
-      ! cdl -- if (sto%iconvert(n) /= 0) then
-      ! ----------------------------------------------------
-      ! calculate saturation derivative as dS/dzeta * dzeta/dh_fresh
-      !    derv = sQuadraticSaturationDerivative(tp, bt, zetanew)
-      !    derv = derv * dssdh
-      ! -----------------------------------------------------
-      ! calculate saturation derivative directly as dS / dh
-      !    sew = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
-      !    dereps = 1e-6
-      !    if (isaltwater == 0) then
-      !      zetanew = this%get_zetanew(n, eps_fresh=dereps)
-      !    else
-      !      zetanew = this%get_zetanew(n, eps_salt=dereps)
-      !    endif
-      !    derv = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
-      !    derv = (derv-sew)/dereps
-      ! ----------------------------------------------------
-      ! calculate saturation derivative for saltwater as rhof/(rhos-rhof)/TOTTHICK and freshwater as rhos/(rhos-rhof)/TOTTHICK
-      derv = dssdh / tthk
-      !      if(isaltwater.eq.0) derv = -0.5
-      !      if(isaltwater.eq.1) derv = 0.5125
-      ! ----------------------------------------------------
-      !
-      ! newton terms for specific storage
-      if (sto%iconf_ss == 0) then
-        if (sto%iorig_ss == 0) then
-          drterm = -rho1 * derv * (h - bt) + rho1 * tthk * snnew * derv
-        else
-          drterm = -(rho1 * derv * h)
-        end if
-        !sp**         call matrix_sln%add_value_pos(idxglo(idiag), drterm)
-        !sp**         rhs(n) = rhs(n) + drterm * h
-      end if
-      !
-      ! newton terms for specific yield
-      !    only calculated if the current saturation
-      !    is less than one
-      if (snnew < DONE) then
-        ! calculate newton terms for specific yield
-        if (snnew > DZERO) then
-          rterm = -rho2 * tthk * snnew
-          drterm = -rho2 * tthk * derv
-          ! swi correction on freshwater flips sign so for saltwater equation flip sign back
-          if (isaltwater == 1) then
-            rterm = -rterm
-            drterm = -drterm
-            rho2 = -rho2
-          end if
-          ! subtract saltwater part from total flow terms
-          call matrix_sln%add_value_pos(idxglo(idiag), -drterm - rho2)
-          !     rhs(n) = rhs(n) -(- rterm + drterm * hnew(n) + rho2 * bt)  !csp**** check with single equation
-          rhs(n) = rhs(n) - (-rterm + drterm * hnew(n) + rho2 * bt)
-        end if
-      end if
-      ! cdl -- end if
-    end do
-    !
-    ! return
-    return
-  end subroutine swi_fn_storage
-  !
-  !
 
   !-----------------------------------------------
   !
@@ -1985,7 +1643,8 @@ contains
     cond = npf%condsat(jas)
     consterm = -cond * (hnew(iups) - hnew(idn))
     zetaup = this%swi%get_zetanew(iups)
-    derv = sQuadraticSaturationDerivative(topup, botup, hnew(iups), npf%satomega) + &
+    derv = sQuadraticSaturationDerivative(topup, botup, hnew(iups), &
+                                          npf%satomega) + &
            this%swi%alphaf * &
            sQuadraticSaturationDerivative(topup, botup, zetaup, npf%satomega)
     idiagm = npf%dis%con%ia(m)
@@ -2028,18 +1687,17 @@ contains
     is_active = .true.
   end function swisto_is_active
 
-  !> @brief SWI STO formulation: freshwater storage fill for cell n, in
-  !! override form. Assembled as the difference of two bottom-referenced columns:
-  !! the water column (S^w, via the STO default) minus the salt column (S^s).
-  !! COMMIT 1 (behavior-preserving relocation): the salt-column terms reproduce
-  !! the former swi_fc_storage correction for the single-fluid freshwater model,
-  !! branching on sto%inewton (Newton uses SyTerms(S^s) plus the swisto_fn
-  !! tangent; Picard uses the -alphaf*rho2 chord). Cleanup into a proper
-  !! chord-slope/smoothed-tangent split is Commit 2.
+  !> @brief SWI STO formulation: freshwater storage fill for cell n, in override
+  !! form. The freshwater storage is the difference of two bottom-referenced
+  !! columns, S^f = S^w - S^s: the water column (S^w) is filled by the STO
+  !! default, and the salt column (S^s) is subtracted here. Each contribution is
+  !! residual-consistent (its aterm*h - rhsterm equals the smoothed storage rate),
+  !! so it converges under Picard on its own; the smoothed-tangent upgrade for the
+  !! interface-movement (drainable) term is added in swisto_fn (Newton only).
   !<
   subroutine swisto_fc(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
     use TdisModule, only: delt
-    use GwfStorageUtilsModule, only: SsCapacity, SyCapacity, SsTerms, SyTerms
+    use GwfStorageUtilsModule, only: SsCapacity, SyCapacity, SsTerms
     class(SwiStoFormulationType), intent(inout) :: this
     integer(I4B), intent(in) :: n
     class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
@@ -2050,35 +1708,32 @@ contains
     ! local
     type(GwfStoType), pointer :: sto
     integer(I4B) :: idiag
-    real(DP) :: tled, tp, bt
+    real(DP) :: tled, tp, bt, tthk
     real(DP) :: sc1, rho1, rho1old, sc2, rho2, rho2old
-    real(DP) :: snold, snnew, sfrac, aterm, rhsterm
-    real(DP) :: zetanew, zetaold
+    real(DP) :: snew, sold, ssnew, ssold, aterm, rhsterm, rate_s
     !
     sto => this%sto
-    ! reset the Picard-branch storage arrays (read back in swisto_cq)
-    this%swi%hcof(n) = DZERO
-    this%swi%rhs(n) = DZERO
     if (this%swi%ibound(n) < 1) return
     tled = DONE / delt
     idiag = sto%dis%con%ia(n)
     tp = sto%dis%top(n)
     bt = sto%dis%bot(n)
+    tthk = tp - bt
     !
     ! -- water column (S^w): standard STO default fill (bottom-referenced)
     call sto%fc_default_sto(n, matrix_sln, rhs, idxglo, h_old, h_new)
     !
-    ! -- salt column (S^s) correction: freshwater = S^w - S^s (single-fluid)
-    zetanew = this%swi%get_zetanew(n)
-    zetaold = this%swi%get_zetaold(n)
+    ! -- salt column (S^s) smoothed saturations: S^s = sat(zeta)
+    ssnew = sQuadraticSaturation(tp, bt, this%swi%get_zetanew(n), sto%satomega)
+    ssold = sQuadraticSaturation(tp, bt, this%swi%get_zetaold(n), sto%satomega)
     !
-    ! compressible (Ss): subtract the saltwater fraction of the S^w term
+    ! -- compressible (Ss): subtract the saltwater fraction of the S^w term
     if (sto%iconvert(n) == 0) then
-      snold = DONE
-      snnew = DONE
+      sold = DONE
+      snew = DONE
     else
-      snold = sQuadraticSaturation(tp, bt, h_old(n), sto%satomega)
-      snnew = sQuadraticSaturation(tp, bt, h_new(n), sto%satomega)
+      sold = sQuadraticSaturation(tp, bt, h_old(n), sto%satomega)
+      snew = sQuadraticSaturation(tp, bt, h_new(n), sto%satomega)
     end if
     sc1 = SsCapacity(sto%istor_coef, tp, bt, sto%dis%area(n), sto%ss(n))
     rho1 = sc1 * tled
@@ -2089,14 +1744,17 @@ contains
       rho1old = rho1
     end if
     call SsTerms(sto%iconvert(n), sto%iorig_ss, sto%iconf_ss, tp, bt, &
-                 rho1, rho1old, snnew, snold, h_new(n), h_old(n), aterm, rhsterm)
-    sfrac = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
-    aterm = aterm * sfrac
-    rhsterm = rhsterm * sfrac
+                 rho1, rho1old, snew, sold, h_new(n), h_old(n), aterm, rhsterm)
+    aterm = aterm * ssnew
+    rhsterm = rhsterm * ssnew
     call matrix_sln%add_value_pos(idxglo(idiag), -aterm)
     rhs(n) = rhs(n) - rhsterm
     !
-    ! drainable (Sy): interface-movement storage
+    ! -- drainable (Sy) salt column, residual-consistent chord. The residual
+    !    contribution is -rate_s (freshwater = water - salt), applied always;
+    !    the chord diagonal d(-rate_s)/dh ~ -alphaf*rho2 (interior) is applied
+    !    only while the interface is within the cell. swisto_fn upgrades this
+    !    chord to the smoothed interface tangent under Newton.
     sc2 = SyCapacity(sto%dis%area(n), this%swi%sy(n))
     rho2 = sc2 * tled
     if (sto%integratechanges /= 0) then
@@ -2104,89 +1762,23 @@ contains
     else
       rho2old = rho2
     end if
-    snold = sQuadraticSaturation(tp, bt, zetaold, sto%satomega)
-    snnew = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
-    if (sto%inewton /= 0) then
-      ! Newton: subtract SyTerms of the salt column (residual-consistent);
-      ! the interface-movement tangent is added in swisto_fn
-      call SyTerms(tp, bt, rho2, rho2old, snnew, snold, aterm, rhsterm)
-      call matrix_sln%add_value_pos(idxglo(idiag), -aterm)
-      rhs(n) = rhs(n) - rhsterm
+    rate_s = rho2old * tthk * ssold - rho2 * tthk * ssnew
+    if (ssnew > DZERO .and. ssnew < DONE) then
+      aterm = -rho2 * this%swi%alphaf
     else
-      ! Picard: -alphaf*rho2 stabilizing chord diagonal (stored in hcof/rhs so
-      ! swisto_cq can recover the interface-storage rate)
-      rho2 = -rho2 * this%swi%alphaf
-      rho2old = -rho2old * this%swi%alphaf
-      if (zetanew > bt .and. zetaold > bt) then
-        this%swi%hcof(n) = rho2
-        this%swi%rhs(n) = rho2 * h_old(n)
-      else if (zetanew > bt .and. zetaold < bt) then
-        this%swi%hcof(n) = rho2
-        this%swi%rhs(n) = -rho2 * bt / this%swi%alphaf
-      else if (zetanew < bt .and. zetaold > bt) then
-        this%swi%hcof(n) = DZERO
-        this%swi%rhs(n) = rho2 * (bt / this%swi%alphaf + h_old(n))
-      end if
-      call matrix_sln%add_value_pos(idxglo(idiag), this%swi%hcof(n))
-      rhs(n) = rhs(n) + this%swi%rhs(n)
+      aterm = DZERO
     end if
+    rhsterm = aterm * h_new(n) + rate_s
+    call matrix_sln%add_value_pos(idxglo(idiag), aterm)
+    rhs(n) = rhs(n) + rhsterm
   end subroutine swisto_fc
 
-  !> @brief Add the drainable-storage head-derivative (interface movement) as a
-  !! Jacobian term (does not change the converged solution).
-  !<
-  subroutine swisto_sy_deriv(this, n, matrix_sln, rhs, idxglo, h_new, rho2, tthk)
-    use SmoothingModule, only: sQuadraticSaturationDerivative
-    class(SwiStoFormulationType), intent(inout) :: this
-    integer(I4B), intent(in) :: n
-    class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
-    real(DP), dimension(:), intent(inout) :: rhs
-    integer(I4B), dimension(:), intent(in) :: idxglo
-    real(DP), dimension(:), intent(in) :: h_new
-    real(DP), intent(in) :: rho2, tthk
-    real(DP) :: tp, bt, omega, zeta, dsfdh, drterm
-    integer(I4B) :: idiag
-    tp = this%sto%dis%top(n)
-    bt = this%sto%dis%bot(n)
-    omega = this%sto%satomega
-    zeta = this%swi%get_zetanew(n)
-    dsfdh = sQuadraticSaturationDerivative(tp, bt, h_new(n), omega) + &
-            this%swi%alphaf * sQuadraticSaturationDerivative(tp, bt, zeta, omega)
-    drterm = rho2 * tthk * dsfdh
-    idiag = this%sto%dis%con%ia(n)
-    call matrix_sln%add_value_pos(idxglo(idiag), -drterm)
-    rhs(n) = rhs(n) - drterm * h_new(n)
-  end subroutine swisto_sy_deriv
-
-  !> @brief Freshwater saturation S^f = S^w(head) - S^s(zeta) for cell n
-  !<
-  function swisto_satf(this, n, head, old) result(satf)
-    class(SwiStoFormulationType), intent(inout) :: this
-    integer(I4B), intent(in) :: n
-    real(DP), intent(in) :: head
-    logical(LGP), intent(in), optional :: old
-    real(DP) :: satf
-    real(DP) :: tp, bt, omega, zeta
-    logical(LGP) :: isold
-    isold = .false.
-    if (present(old)) isold = old
-    tp = this%sto%dis%top(n)
-    bt = this%sto%dis%bot(n)
-    omega = this%sto%satomega
-    if (isold) then
-      zeta = this%swi%get_zetaold(n)
-    else
-      zeta = this%swi%get_zetanew(n)
-    end if
-    satf = sQuadraticSaturation(tp, bt, head, omega) - &
-           sQuadraticSaturation(tp, bt, zeta, omega)
-  end function swisto_satf
-
-  !> @brief SWI STO formulation: storage Newton terms for cell n. The
-  !! interface-movement (drainable) head derivative is a pure Jacobian term and
-  !! lives here (added on top of swisto_fc's residual-consistent fill). COMMIT 1:
-  !! reproduces the former swi_fn_storage terms for the single-fluid freshwater
-  !! model. Called only when Newton is active (sto_fn dispatch).
+  !> @brief SWI STO formulation: storage Newton terms for cell n. Upgrades the
+  !! residual-consistent chord diagonals filled in swisto_fc to the exact smoothed
+  !! tangents: the water column via the STO default, and the salt column via the
+  !! interface-movement delta. The delta cancels at convergence (the residual is
+  !! set in swisto_fc), so it only sharpens the Jacobian. Called only when Newton
+  !! is active (sto_fn dispatch).
   !<
   subroutine swisto_fn(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
     use TdisModule, only: delt
@@ -2201,30 +1793,34 @@ contains
     ! local
     type(GwfStoType), pointer :: sto
     integer(I4B) :: idiag
-    real(DP) :: tled, tp, bt, tthk, h
-    real(DP) :: sc2, rho2, snnew, derv, rterm, drterm
-    real(DP) :: zetanew
+    real(DP) :: tled, tp, bt, tthk
+    real(DP) :: sc2, rho2, ssnew, sderiv, a_fn
     !
     sto => this%sto
     if (this%swi%ibound(n) < 1) return
+    !
+    ! -- water column (S^w): standard STO default Newton tangent (upgrades the
+    !    fc_default_sto chord)
+    call sto%fn_default_sto(n, matrix_sln, rhs, idxglo, h_old, h_new)
+    !
+    ! -- salt column (S^s): smoothed interface tangent delta over the chord in
+    !    swisto_fc, applied only while the interface is within the cell
     tled = DONE / delt
     idiag = sto%dis%con%ia(n)
     tp = sto%dis%top(n)
     bt = sto%dis%bot(n)
     tthk = tp - bt
-    h = h_new(n)
-    zetanew = this%swi%get_zetanew(n)
-    snnew = sQuadraticSaturation(tp, bt, zetanew)
-    sc2 = SyCapacity(sto%dis%area(n), this%swi%sy(n))
-    rho2 = sc2 * tled
-    ! dS^s/dh_fresh * (1/tthk); dssdh = -alphaf for the freshwater model
-    derv = -this%swi%alphaf / tthk
-    ! interface-movement (Sy) Newton terms; applied where 0 < S^s < 1
-    if (snnew < DONE .and. snnew > DZERO) then
-      rterm = -rho2 * tthk * snnew
-      drterm = -rho2 * tthk * derv
-      call matrix_sln%add_value_pos(idxglo(idiag), -drterm - rho2)
-      rhs(n) = rhs(n) - (-rterm + drterm * h + rho2 * bt)
+    ssnew = sQuadraticSaturation(tp, bt, this%swi%get_zetanew(n), sto%satomega)
+    if (ssnew > DZERO .and. ssnew < DONE) then
+      sc2 = SyCapacity(sto%dis%area(n), this%swi%sy(n))
+      rho2 = sc2 * tled
+      sderiv = sQuadraticSaturationDerivative(tp, bt, this%swi%get_zetanew(n), &
+                                              sto%satomega)
+      ! net salt tangent d(-rate_s)/dh = -alphaf*rho2*tthk*sderiv; the fc chord
+      ! was -alphaf*rho2, so the fn delta is alphaf*rho2*(1 - tthk*sderiv)
+      a_fn = this%swi%alphaf * rho2 * (DONE - tthk * sderiv)
+      call matrix_sln%add_value_pos(idxglo(idiag), a_fn)
+      rhs(n) = rhs(n) + a_fn * h_new(n)
     end if
   end subroutine swisto_fn
 
@@ -2247,10 +1843,9 @@ contains
     ! local
     type(GwfStoType), pointer :: sto
     integer(I4B) :: idiag
-    real(DP) :: tled, tp, bt
+    real(DP) :: tled, tp, bt, tthk
     real(DP) :: sc1, rho1, rho1old, sc2, rho2, rho2old
-    real(DP) :: snold, snnew, sfrac, aterm, rhsterm, rate
-    real(DP) :: zetanew, zetaold
+    real(DP) :: snew, sold, ssnew, ssold, aterm, rhsterm, rate, rate_s
     !
     sto => this%sto
     this%swi%storage(n) = DZERO
@@ -2262,16 +1857,17 @@ contains
     idiag = sto%dis%con%ia(n)
     tp = sto%dis%top(n)
     bt = sto%dis%bot(n)
-    zetanew = this%swi%get_zetanew(n)
-    zetaold = this%swi%get_zetaold(n)
+    tthk = tp - bt
+    ssnew = sQuadraticSaturation(tp, bt, this%swi%get_zetanew(n), sto%satomega)
+    ssold = sQuadraticSaturation(tp, bt, this%swi%get_zetaold(n), sto%satomega)
     !
     ! -- compressible (Ss): subtract the saltwater fraction from strgss and flowja
     if (sto%iconvert(n) == 0) then
-      snold = DONE
-      snnew = DONE
+      sold = DONE
+      snew = DONE
     else
-      snold = sQuadraticSaturation(tp, bt, h_old(n), sto%satomega)
-      snnew = sQuadraticSaturation(tp, bt, h_new(n), sto%satomega)
+      sold = sQuadraticSaturation(tp, bt, h_old(n), sto%satomega)
+      snew = sQuadraticSaturation(tp, bt, h_new(n), sto%satomega)
     end if
     sc1 = SsCapacity(sto%istor_coef, tp, bt, sto%dis%area(n), sto%ss(n))
     rho1 = sc1 * tled
@@ -2282,33 +1878,25 @@ contains
       rho1old = rho1
     end if
     call SsTerms(sto%iconvert(n), sto%iorig_ss, sto%iconf_ss, tp, bt, &
-                 rho1, rho1old, snnew, snold, h_new(n), h_old(n), &
+                 rho1, rho1old, snew, sold, h_new(n), h_old(n), &
                  aterm, rhsterm, rate)
-    sfrac = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
-    rate = sfrac * rate
+    rate = ssnew * rate
     sto%strgss(n) = sto%strgss(n) - rate
     flowja(idiag) = flowja(idiag) - rate
     !
-    ! -- drainable (Sy): interface-movement storage -> SWI storage term, flowja
-    rate = DZERO
-    snold = sQuadraticSaturation(tp, bt, zetaold, sto%satomega)
-    snnew = sQuadraticSaturation(tp, bt, zetanew, sto%satomega)
-    if (sto%inewton /= 0) then
-      sc2 = SyCapacity(sto%dis%area(n), this%swi%sy(n))
-      rho2 = sc2 * tled
-      if (sto%integratechanges /= 0) then
-        rho2old = SyCapacity(sto%dis%area(n), this%swi%oldsy(n)) * tled
-      else
-        rho2old = rho2
-      end if
-      call SyTerms(tp, bt, rho2, rho2old, snnew, snold, aterm, rhsterm, rate)
-      rate = -rate
+    ! -- drainable (Sy): interface-movement storage. The SWI storage budget term
+    !    is the salt-column rate (the fresh<->salt conversion volume), which is
+    !    also added to flowja to complete the freshwater storage.
+    sc2 = SyCapacity(sto%dis%area(n), this%swi%sy(n))
+    rho2 = sc2 * tled
+    if (sto%integratechanges /= 0) then
+      rho2old = SyCapacity(sto%dis%area(n), this%swi%oldsy(n)) * tled
     else
-      ! Picard: recover the interface-storage rate from the fc chord terms
-      rate = this%swi%hcof(n) * h_new(n) - this%swi%rhs(n)
+      rho2old = rho2
     end if
-    this%swi%storage(n) = rate
-    flowja(idiag) = flowja(idiag) + rate
+    rate_s = rho2old * tthk * ssold - rho2 * tthk * ssnew
+    this%swi%storage(n) = -rate_s
+    flowja(idiag) = flowja(idiag) + this%swi%storage(n)
   end subroutine swisto_cq
 
   !> @brief SWI STO formulation: add SWI storage to the model budget
