@@ -1003,10 +1003,14 @@ contains
   !! in its buoyant direction -- freshwater up, saltwater down -- and is gated in
   !! the other by the fluid present at the shared face: freshwater flows down only
   !! if the interface is below the face (fresh at the face); saltwater flows up
-  !! only if the interface is above the face (salt at the face). The interface
-  !! gate is smoothed (sSCurve over a satomega*thickness band); the flow-direction
-  !! switch is discrete (the flux is zero there). The blocked case is reduced to a
-  !! residual (1e-6) conductance rather than zero, to avoid a singular row.
+  !! only if the interface is above the face (salt at the face). Both switches --
+  !! the interface position and the flow direction -- are smoothed with sSCurve
+  !! and combined with a smooth OR, so the conductance stays differentiable as the
+  !! interface crosses the face. The smoothing band is a fraction of the thickness
+  !! of the cell whose interface is being gated (the upper cell for freshwater,
+  !! the lower cell for saltwater), so it is meaningful when the two cells differ
+  !! in thickness. The blocked case is reduced to a residual (1e-6) conductance
+  !! rather than zero, to avoid a singular row.
   !<
   function swinpf_vcondf(this, n, m, jas, hnew) result(condf)
     class(SwiNpfFormulationType), intent(inout) :: this
@@ -1018,7 +1022,7 @@ contains
     ! local
     type(GwfNpfType), pointer :: npf
     integer(I4B) :: iu, il
-    real(DP) :: zface, band, hband, dydx, factor, tthk, sface, sup
+    real(DP) :: zface, band, hband, dydx, factor, sface, sup
     !
     npf => this%npf
     ! -- identify the upper (iu) and lower (il) cell; the shared face is at
@@ -1031,26 +1035,30 @@ contains
       il = n
     end if
     zface = npf%dis%bot(iu)
-    tthk = npf%dis%top(iu) - npf%dis%bot(iu)
-    ! -- smoothing scales: the interface gate smooths over an elevation band; the
-    !    flow-direction gate smooths over the equivalent head band (a zeta change
-    !    of `band` corresponds to a head change of band/alphaf), so both derive
-    !    from one scale.  TODO: expose the fraction as input / tie to satomega.
-    band = 1.0d-1 * tthk
-    hband = band / this%swi%alphaf
-    !
-    ! -- smoothed upflow indicator (1 for upflow, h_lower > h_upper; 0 for down)
-    call sSCurve((hnew(il) - hnew(iu)) + DHALF * hband, hband, dydx, sup)
     !
     ! -- each fluid passes if it is present at the face OR flows in its buoyant
     !    direction (smooth "OR"): freshwater passes if fresh-at-face OR upflow;
-    !    saltwater passes if salt-at-face OR downflow (= 1 - upflow)
+    !    saltwater passes if salt-at-face OR downflow (= 1 - upflow). Smoothing
+    !    scales: the interface gate smooths over a fraction of the thickness of
+    !    the cell that holds the gated interface; the flow-direction gate smooths
+    !    over the equivalent head band (a zeta change of `band` is a head change
+    !    of band/alpha).  TODO: expose the 0.1 fraction as input.
     if (this%swi%isaltwater == 0) then
+      ! freshwater: the gated interface zeta(iu) is in the UPPER cell
+      band = 1.0d-1 * (npf%dis%top(iu) - npf%dis%bot(iu))
+      hband = band / this%swi%alphaf
+      ! smoothed upflow indicator (1 for upflow, h_lower > h_upper; 0 for down)
+      call sSCurve((hnew(il) - hnew(iu)) + DHALF * hband, hband, dydx, sup)
       ! sface = smoothed "fresh at the face" (interface in upper cell below face)
       call sSCurve((zface - this%swi%get_zetanew(iu)) + DHALF * band, band, &
                    dydx, sface)
       factor = DONE - (DONE - sface) * (DONE - sup)
     else
+      ! saltwater: the gated interface zeta(il) is in the LOWER cell
+      band = 1.0d-1 * (npf%dis%top(il) - npf%dis%bot(il))
+      hband = band / this%swi%alphas
+      ! smoothed upflow indicator (1 for upflow, h_lower > h_upper; 0 for down)
+      call sSCurve((hnew(il) - hnew(iu)) + DHALF * hband, hband, dydx, sup)
       ! sface = smoothed "salt at the face" (interface in lower cell above face)
       call sSCurve((this%swi%get_zetanew(il) - zface) + DHALF * band, band, &
                    dydx, sface)
