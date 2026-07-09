@@ -1,9 +1,9 @@
 module GwfSwiModule
 
   use KindModule, only: DP, I4B, LGP
-  use ConstantsModule, only: LINELENGTH, DONE, DZERO, LENBUDTXT, &
+  use ConstantsModule, only: LINELENGTH, DONE, DZERO, DHALF, LENBUDTXT, &
                              MNORMAL, DHNOFLO, C3D_VERTICAL, LENMODELNAME, &
-                             DEM12
+                             DEM6, DEM12
   use SimVariablesModule, only: errmsg
   use SimModule, only: store_error, store_error_filename
   use NumericalPackageModule, only: NumericalPackageType
@@ -12,7 +12,7 @@ module GwfSwiModule
   use GwfNpfModule, only: GwfNpfType
   use GwfStoModule, only: GwfStoType
   use SmoothingModule, only: sQuadraticSaturation, &
-                             sQuadraticSaturationDerivative
+                             sQuadraticSaturationDerivative, sSCurve
   use MemoryManagerModule, only: mem_setptr, mem_allocate
   use MemoryHelperModule, only: create_mem_path
   use MatrixBaseModule
@@ -221,7 +221,7 @@ contains
     type(GwfStoType), pointer, intent(inout) :: sto !< model STO package
     ! local
     integer(I4B) :: n
-    integer(I4B) :: ipos, ihc
+    integer(I4B) :: ipos
     type(SwiNpfFormulationType), pointer :: npf_form
     type(SwiStoFormulationType), pointer :: sto_form
 
@@ -284,8 +284,10 @@ contains
       end do
     end if
 
-    ! register the SWI NPF flow formulation and flag its (horizontal)
-    ! connections so NPF dispatches them to the SWI override
+    ! register the SWI NPF flow formulation and flag ALL of its connections
+    ! (horizontal and vertical) so NPF dispatches them to the SWI override; the
+    ! formulation applies the fluid-slab conductance for horizontal connections
+    ! and the buoyancy-gated conductance for vertical connections
     allocate (npf_form)
     npf_form%swi => this
     npf_form%npf => npf
@@ -293,8 +295,7 @@ contains
     call npf%add_flow_formulation(this%npf_form, SWI_FLOW)
     do n = 1, npf%dis%nodes
       do ipos = npf%dis%con%ia(n) + 1, npf%dis%con%ia(n + 1) - 1
-        ihc = npf%dis%con%ihc(npf%dis%con%jas(ipos))
-        if (ihc /= C3D_VERTICAL) npf%iformulation(ipos) = SWI_FLOW
+        npf%iformulation(ipos) = SWI_FLOW
       end do
     end do
 
@@ -388,21 +389,12 @@ contains
     ! (get_zetanew) wherever the solve needs it; the stored zeta array is a
     ! derived output/introspection quantity refreshed post-convergence in swi_cq.
     !
-    ! Horizontal fresh/saltwater flow is filled by the SwiNpfFormulationType
-    ! flow formulation (swinpf_fc/fn/cq, dispatched from NPF). Vertical saltwater
-    ! flow is still filled here by npf_fc_vflow.
+    ! Both horizontal and vertical fresh/saltwater flow are filled by the
+    ! SwiNpfFormulationType flow formulation (swinpf_fc/fn/cq, dispatched from
+    ! NPF for all flagged connections): the fluid-slab conductance for horizontal
+    ! connections and the buoyancy-gated conductance for vertical connections.
     !
-    ! TODO (physics): the vertical saltwater flow term (npf_fc_vflow) needs to be
-    ! revisited. It is the last flow contribution not yet expressed through the
-    ! formulation framework, and the vertical conductance between saltwater cells
-    ! (and its cell-by-cell flow / cq counterpart) is not yet correct for the
-    ! interface geometry. Not exercised by the single-layer regression tests.
-    if (this%isaltwater == 1) then
-      call npf_fc_vflow(npf, kiter, matrix_sln, idxglo, &
-                        rhs, hnew)
-    end if
-    !
-    ! Storage is now assembled by the SWI STO formulation (swisto_fc), dispatched
+    ! Storage is assembled by the SWI STO formulation (swisto_fc), dispatched
     ! from sto_fc for the flagged SWI_STORAGE cells -- no bolt-on correction here.
     !
     ! return
@@ -421,11 +413,11 @@ contains
     type(GwfNpfType) :: npf
     type(GwfStoType) :: sto
     !
-    ! Horizontal flow Newton terms are filled by the SWI NPF formulation
-    ! (swinpf_fn), and storage Newton terms by the SWI STO formulation
-    ! (swisto_fn), both dispatched from the model. This routine is currently a
-    ! no-op; the vertical saltwater flow Newton counterpart of npf_fc_vflow is
-    ! part of the pending vertical-flow physics work (see swi_fc).
+    ! Flow Newton terms are filled by the SWI NPF formulation (swinpf_fn) and
+    ! storage Newton terms by the SWI STO formulation (swisto_fn), both dispatched
+    ! from the model. This routine is a no-op. Note swinpf_fn currently returns
+    ! early for vertical connections, so the buoyancy-gated vertical conductance
+    ! is treated Picard-style (its smoothed-tangent Newton term is future work).
 
   end subroutine swi_fn
 
@@ -961,119 +953,6 @@ contains
     zeta = -alphaf * hf + alphas * hs
   end function calc_zeta
 
-  ! add vertical connections for saltwater model
-  subroutine npf_fc_vflow(npf, kiter, matrix_sln, idxglo, rhs, hnew)
-    ! -- modules
-    use ConstantsModule, only: DONE
-    ! -- dummy
-    class(GwfNpfType) :: npf
-    integer(I4B) :: kiter
-    class(MatrixBaseType), pointer :: matrix_sln
-    integer(I4B), intent(in), dimension(:) :: idxglo
-    real(DP), intent(inout), dimension(:) :: rhs
-    real(DP), intent(in), dimension(:) :: hnew
-    ! -- local
-    integer(I4B) :: n, m, ii, idiag, ihc
-    integer(I4B) :: isymcon, idiagm
-    real(DP) :: hyn, hym
-    real(DP) :: cond
-    ! real(DP) :: satn
-    ! real(DP) :: satm
-    !
-    ! -- Calculate conductance and put into amat
-    !
-    if (npf%ixt3d /= 0) then
-      ! call npf%xt3d%xt3d_fc(kiter, matrix_sln, idxglo, rhs, hnew)
-    else
-      do n = 1, npf%dis%nodes
-        do ii = npf%dis%con%ia(n) + 1, npf%dis%con%ia(n + 1) - 1
-          if (npf%dis%con%mask(ii) == 0) cycle
-
-          m = npf%dis%con%ja(ii)
-          !
-          ! -- Calculate conductance only for upper triangle but insert into
-          !    upper and lower parts of amat.
-          if (m < n) cycle
-          ihc = npf%dis%con%ihc(npf%dis%con%jas(ii))
-          hyn = npf%hy_eff(n, m, ihc, ipos=ii)
-          hym = npf%hy_eff(m, n, ihc, ipos=ii)
-          !
-          ! -- Vertical connection
-          if (ihc == C3D_VERTICAL) then
-            !
-            ! -- Calculate vertical conductance
-            cond = vcond(npf%ibound(n), npf%ibound(m), &
-                         npf%icelltype(n), npf%icelltype(m), npf%inewton, &
-                         npf%ivarcv, npf%idewatcv, &
-                         npf%condsat(npf%dis%con%jas(ii)), hnew(n), hnew(m), &
-                         hyn, hym, &
-                         npf%sat(n), npf%sat(m), &
-                         npf%dis%top(n), npf%dis%top(m), &
-                         npf%dis%bot(n), npf%dis%bot(m), &
-                         npf%dis%con%hwva(npf%dis%con%jas(ii)))
-            !
-            ! -- Vertical flow for perched conditions
-            if (npf%iperched /= 0) then
-              if (npf%icelltype(m) /= 0) then
-                if (hnew(m) < npf%dis%top(m)) then
-                  !
-                  ! -- Fill row n
-                  idiag = npf%dis%con%ia(n)
-                  rhs(n) = rhs(n) - cond * npf%dis%bot(n)
-                  call matrix_sln%add_value_pos(idxglo(idiag), -cond)
-                  !
-                  ! -- Fill row m
-                  isymcon = npf%dis%con%isym(ii)
-                  call matrix_sln%add_value_pos(idxglo(isymcon), cond)
-                  rhs(m) = rhs(m) + cond * npf%dis%bot(n)
-                  !
-                  ! -- cycle the connection loop
-                  cycle
-                end if
-              end if
-            end if
-            !
-          else
-            cond = DZERO
-            ! satn = this%sat(n)
-            ! satm = this%sat(m)
-            ! if (this%ihighcellsat /= 0) then
-            !   call this%highest_cell_saturation(n, m, &
-            !                                     hnew(n), hnew(m), &
-            !                                     satn, satm)
-            ! end if
-            ! !
-            ! ! -- Horizontal conductance
-            ! cond = hcond(this%ibound(n), this%ibound(m), &
-            !              this%icelltype(n), this%icelltype(m), &
-            !              this%inewton, &
-            !              this%dis%con%ihc(this%dis%con%jas(ii)), &
-            !              this%icellavg, &
-            !              this%condsat(this%dis%con%jas(ii)), &
-            !              hnew(n), hnew(m), satn, satm, hyn, hym, &
-            !              this%dis%top(n), this%dis%top(m), &
-            !              this%dis%bot(n), this%dis%bot(m), &
-            !              this%dis%con%cl1(this%dis%con%jas(ii)), &
-            !              this%dis%con%cl2(this%dis%con%jas(ii)), &
-            !              this%dis%con%hwva(this%dis%con%jas(ii)))
-          end if
-          !
-          ! -- Fill row n
-          idiag = npf%dis%con%ia(n)
-          call matrix_sln%add_value_pos(idxglo(ii), cond)
-          call matrix_sln%add_value_pos(idxglo(idiag), -cond)
-          !
-          ! -- Fill row m
-          isymcon = npf%dis%con%isym(ii)
-          idiagm = npf%dis%con%ia(m)
-          call matrix_sln%add_value_pos(idxglo(isymcon), cond)
-          call matrix_sln%add_value_pos(idxglo(idiagm), -cond)
-        end do
-      end do
-      !
-    end if
-  end subroutine npf_fc_vflow
-
   !> @brief Fractional cell freshwater saturation
   !<
   subroutine swi_thksat(n, top, bot, zeta, thksat, inewton)
@@ -1119,6 +998,68 @@ contains
     integer(I4B), intent(in) :: n
   end subroutine swinpf_cf
 
+  !> @brief SWI NPF formulation: vertical fluid-slab conductance for a connection
+  !! between an upper and a lower cell (buoyancy-gated). Each fluid moves freely
+  !! in its buoyant direction -- freshwater up, saltwater down -- and is gated in
+  !! the other by the fluid present at the shared face: freshwater flows down only
+  !! if the interface is below the face (fresh at the face); saltwater flows up
+  !! only if the interface is above the face (salt at the face). The interface
+  !! gate is smoothed (sSCurve over a satomega*thickness band); the flow-direction
+  !! switch is discrete (the flux is zero there). The blocked case is reduced to a
+  !! residual (1e-6) conductance rather than zero, to avoid a singular row.
+  !<
+  function swinpf_vcondf(this, n, m, jas, hnew) result(condf)
+    class(SwiNpfFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: n
+    integer(I4B), intent(in) :: m
+    integer(I4B), intent(in) :: jas
+    real(DP), dimension(:), intent(in) :: hnew
+    real(DP) :: condf
+    ! local
+    type(GwfNpfType), pointer :: npf
+    integer(I4B) :: iu, il
+    real(DP) :: zface, band, hband, dydx, factor, tthk, sface, sup
+    !
+    npf => this%npf
+    ! -- identify the upper (iu) and lower (il) cell; the shared face is at
+    !    bot(iu) = top(il)
+    if (npf%dis%bot(n) > npf%dis%bot(m)) then
+      iu = n
+      il = m
+    else
+      iu = m
+      il = n
+    end if
+    zface = npf%dis%bot(iu)
+    tthk = npf%dis%top(iu) - npf%dis%bot(iu)
+    ! -- smoothing scales: the interface gate smooths over an elevation band; the
+    !    flow-direction gate smooths over the equivalent head band (a zeta change
+    !    of `band` corresponds to a head change of band/alphaf), so both derive
+    !    from one scale.  TODO: expose the fraction as input / tie to satomega.
+    band = 1.0d-1 * tthk
+    hband = band / this%swi%alphaf
+    !
+    ! -- smoothed upflow indicator (1 for upflow, h_lower > h_upper; 0 for down)
+    call sSCurve((hnew(il) - hnew(iu)) + DHALF * hband, hband, dydx, sup)
+    !
+    ! -- each fluid passes if it is present at the face OR flows in its buoyant
+    !    direction (smooth "OR"): freshwater passes if fresh-at-face OR upflow;
+    !    saltwater passes if salt-at-face OR downflow (= 1 - upflow)
+    if (this%swi%isaltwater == 0) then
+      ! sface = smoothed "fresh at the face" (interface in upper cell below face)
+      call sSCurve((zface - this%swi%get_zetanew(iu)) + DHALF * band, band, &
+                   dydx, sface)
+      factor = DONE - (DONE - sface) * (DONE - sup)
+    else
+      ! sface = smoothed "salt at the face" (interface in lower cell above face)
+      call sSCurve((this%swi%get_zetanew(il) - zface) + DHALF * band, band, &
+                   dydx, sface)
+      factor = DONE - (DONE - sface) * sup
+    end if
+    ! -- reduce (not zero) to avoid a singular row where a fluid is blocked
+    condf = npf%condsat(jas) * max(factor, DEM6)
+  end function swinpf_vcondf
+
   !> @brief SWI NPF formulation: fluid-slab conductance for connection ipos.
   !! Freshwater slab (S^w - S^s, between zeta and the water table) or saltwater
   !! slab (S^s, between the bottom and zeta). The conductance follows the model's
@@ -1145,7 +1086,10 @@ contains
     condf = DZERO
     jas = npf%dis%con%jas(ipos)
     ihc = npf%dis%con%ihc(jas)
-    if (ihc == C3D_VERTICAL) return
+    if (ihc == C3D_VERTICAL) then
+      condf = swinpf_vcondf(this, n, m, jas, hnew)
+      return
+    end if
     tn = npf%dis%top(n)
     tm = npf%dis%top(m)
     bn = npf%dis%bot(n)
@@ -1208,7 +1152,6 @@ contains
     real(DP) :: condf
     !
     npf => this%npf
-    if (npf%dis%con%ihc(npf%dis%con%jas(ipos)) == C3D_VERTICAL) return
     condf = swinpf_condf(this, n, m, ipos, hnew)
     idiag = npf%dis%con%ia(n)
     isymcon = npf%dis%con%isym(ipos)
@@ -1307,7 +1250,6 @@ contains
     real(DP) :: condf, qnm
     !
     npf => this%npf
-    if (npf%dis%con%ihc(npf%dis%con%jas(ipos)) == C3D_VERTICAL) return
     condf = swinpf_condf(this, n, m, ipos, h_new)
     qnm = condf * (h_new(m) - h_new(n))
     flowja(ipos) = qnm
