@@ -998,33 +998,57 @@ contains
     integer(I4B), intent(in) :: n
   end subroutine swinpf_cf
 
-  !> @brief SWI NPF formulation: vertical fluid-slab conductance for a connection
-  !! between an upper and a lower cell (buoyancy-gated). Each fluid moves freely
-  !! in its buoyant direction -- freshwater up, saltwater down -- and is gated in
-  !! the other by the fluid present at the shared face: freshwater flows down only
-  !! if the interface is below the face (fresh at the face); saltwater flows up
-  !! only if the interface is above the face (salt at the face). Both switches --
-  !! the interface position and the flow direction -- are smoothed with sSCurve
-  !! and combined with a smooth OR, so the conductance stays differentiable as the
-  !! interface crosses the face. The smoothing band is a fraction of the thickness
-  !! of the cell whose interface is being gated (the upper cell for freshwater,
-  !! the lower cell for saltwater), so it is meaningful when the two cells differ
-  !! in thickness. The blocked case is reduced to a residual (1e-6) conductance
-  !! rather than zero, to avoid a singular row.
+  !> @brief SWI NPF formulation: vertical conductance for a connection between an
+  !! upper and a lower cell.
+  !!
+  !! Single-fluid (freshwater-only): the interface is a diagnostic derived from a
+  !! continuous freshwater potential, so the standard (ungated) vertical
+  !! conductance is returned. SWI still owns the connection -- so the treatment
+  !! can be changed later -- but does not adjust it. Gating the vertical flow here
+  !! would decouple the deep cells below the interface and leave the head field
+  !! underdetermined.
+  !!
+  !! Two-fluid (buoyancy-gated): each fluid moves freely in its buoyant direction
+  !! -- freshwater up, saltwater down -- and is gated in the other by the fluid
+  !! present at the shared face: freshwater flows down only if the interface is
+  !! below the face (fresh at the face); saltwater flows up only if the interface
+  !! is above the face (salt at the face). Both switches -- the interface position
+  !! and the flow direction -- are smoothed with sSCurve and combined with a
+  !! smooth OR, so the conductance stays differentiable as the interface crosses
+  !! the face. The smoothing band is a fraction of the thickness of the cell whose
+  !! interface is being gated (the upper cell for freshwater, the lower cell for
+  !! saltwater), so it is meaningful when the two cells differ in thickness. The
+  !! blocked case is reduced to a residual (1e-6) conductance rather than zero, to
+  !! avoid a singular row.
   !<
-  function swinpf_vcondf(this, n, m, jas, hnew) result(condf)
+  function swinpf_vcondf(this, n, m, ipos, hnew) result(condf)
     class(SwiNpfFormulationType), intent(inout) :: this
     integer(I4B), intent(in) :: n
     integer(I4B), intent(in) :: m
-    integer(I4B), intent(in) :: jas
+    integer(I4B), intent(in) :: ipos
     real(DP), dimension(:), intent(in) :: hnew
     real(DP) :: condf
     ! local
     type(GwfNpfType), pointer :: npf
-    integer(I4B) :: iu, il
-    real(DP) :: zface, band, hband, dydx, factor, sface, sup
+    integer(I4B) :: iu, il, jas, ihc
+    real(DP) :: zface, band, hband, dydx, factor, sface, sup, hyn, hym
     !
     npf => this%npf
+    jas = npf%dis%con%jas(ipos)
+    !
+    ! -- single-fluid: standard (ungated) vertical conductance
+    if (this%swi%iconfiguration == FRESHWATER_ONE_FLUID) then
+      ihc = npf%dis%con%ihc(jas)
+      hyn = npf%hy_eff(n, m, ihc, ipos=ipos)
+      hym = npf%hy_eff(m, n, ihc, ipos=ipos)
+      condf = vcond(npf%ibound(n), npf%ibound(m), &
+                    npf%icelltype(n), npf%icelltype(m), npf%inewton, &
+                    npf%ivarcv, npf%idewatcv, npf%condsat(jas), &
+                    hnew(n), hnew(m), hyn, hym, npf%sat(n), npf%sat(m), &
+                    npf%dis%top(n), npf%dis%top(m), &
+                    npf%dis%bot(n), npf%dis%bot(m), npf%dis%con%hwva(jas))
+      return
+    end if
     ! -- identify the upper (iu) and lower (il) cell; the shared face is at
     !    bot(iu) = top(il)
     if (npf%dis%bot(n) > npf%dis%bot(m)) then
@@ -1095,7 +1119,7 @@ contains
     jas = npf%dis%con%jas(ipos)
     ihc = npf%dis%con%ihc(jas)
     if (ihc == C3D_VERTICAL) then
-      condf = swinpf_vcondf(this, n, m, jas, hnew)
+      condf = swinpf_vcondf(this, n, m, ipos, hnew)
       return
     end if
     tn = npf%dis%top(n)
