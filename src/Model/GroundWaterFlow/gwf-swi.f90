@@ -475,8 +475,6 @@ contains
   !!
   !<
   subroutine swi_cq(this, hnew, hold, flowja, npf, sto)
-    ! modules
-    !
     ! dummy variables
     class(GwfSwiType) :: this !< GwfSwiType object
     real(DP), intent(in), dimension(:) :: hnew
@@ -484,45 +482,12 @@ contains
     real(DP), dimension(:), contiguous, intent(inout) :: flowja !< connection flows
     type(GwfNpfType), intent(in) :: npf
     type(GwfStoType), intent(in) :: sto
-    ! local variables
-    integer(I4B) :: n, ii, m, ictn, ictm
-    real(DP) :: qnm
     !
-    ! todo: need to issue error if xt3d is active
-    ! if (npf%ixt3d /= 0) then
-    !   call npf%xt3d%xt3d_fc(kiter, matrix_sln, idxglo, rhs, hnew)
-    ! else
-
-    ! loop over nodes and connections and call swi_qcalc to subtract qnm from flowja
-    ictn = 1
-    ictm = 1
-    do n = 1, npf%dis%nodes
-      do ii = npf%dis%con%ia(n) + 1, npf%dis%con%ia(n + 1) - 1
-        if (npf%dis%con%mask(ii) == 0) cycle
-
-        ! Calculate terms only for upper triangle but insert into
-        ! upper and lower parts of amat.
-        m = npf%dis%con%ja(ii)
-        if (m < n) cycle
-        !
-        call swi_qcalc(npf, n, m, ii, ictn, ictm, hnew(n), hnew(m), qnm, &
-                       this%zeta)
-        !
-        ! For saltwater equation, flip sign on rate to just add it
-        if (this%isaltwater == 1) qnm = -qnm
-        !
-        !       change sign to subtract out qnm from salt side
-        flowja(ii) = flowja(ii) - qnm
-        flowja(this%dis%con%isym(ii)) = flowja(this%dis%con%isym(ii)) + qnm
-      end do
-    end do
-    ! endif ! xt3d if-check
-    !
-    ! Storage flows are now assembled by the SWI STO formulation (swisto_cq),
-    ! dispatched from sto_cq for the flagged SWI_STORAGE cells; the SWI storage
-    ! budget/cbc term is reported via swisto_bd / swisto_save_flows.
-    !
-    ! return
+    ! Intercell freshwater/saltwater flows (FLOW-JA-FACE) are now assembled by the
+    ! SWI NPF formulation (swinpf_cq, dispatched from npf_cq), consistent with the
+    ! matrix fill in swinpf_fc; storage flows are assembled by the SWI STO
+    ! formulation (swisto_cq). Nothing to add here for horizontal SWI flow;
+    ! vertical saltwater flow cq is future work.
     return
   end subroutine swi_cq
 
@@ -1539,25 +1504,29 @@ contains
   !! n-m, overriding the default NPF term. condf = cond(S^w) - cond(S^s), i.e. the
   !! conductance based on the freshwater column between the interface and the head.
   !<
-  subroutine swinpf_fc(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
+  !> @brief SWI NPF formulation: fluid-slab conductance for connection ipos.
+  !! Freshwater slab (S^w - S^s, between zeta and the water table) or saltwater
+  !! slab (S^s, between the bottom and zeta). Returns zero for vertical
+  !! connections (SWI overrides horizontal flow only). Shared by fc and cq so the
+  !! matrix fill and the cell-by-cell flow use the same conductance.
+  !<
+  function swinpf_condf(this, n, m, ipos, hnew) result(condf)
     class(SwiNpfFormulationType), intent(inout) :: this
     integer(I4B), intent(in) :: n
     integer(I4B), intent(in) :: m
     integer(I4B), intent(in) :: ipos
-    class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
-    real(DP), dimension(:), intent(inout) :: rhs
-    integer(I4B), dimension(:), intent(in) :: idxglo
     real(DP), dimension(:), intent(in) :: hnew
+    real(DP) :: condf
     ! local
     type(GwfNpfType), pointer :: npf
-    integer(I4B) :: idiag, ihc, isymcon, idiagm, jas, ictn, ictm
-    real(DP) :: hyn, hym, cond, condsw, condf
-    real(DP) :: satn, satm, satn_s, satm_s, tn, tm, bn, bm, tthkn, tthkm
+    integer(I4B) :: ihc, jas, ictn, ictm
+    real(DP) :: hyn, hym, cond, condsw
+    real(DP) :: satn_s, satm_s, tn, tm, bn, bm, tthkn, tthkm
     !
     npf => this%npf
+    condf = DZERO
     jas = npf%dis%con%jas(ipos)
     ihc = npf%dis%con%ihc(jas)
-    ! SWI (single-fluid) overrides horizontal flow only
     if (ihc == C3D_VERTICAL) return
     tn = npf%dis%top(n)
     tm = npf%dis%top(m)
@@ -1577,8 +1546,7 @@ contains
                  npf%dis%con%hwva(jas))
     !
     ! -- saltwater-column (S^s) conductance below the interface (zeta), with the
-    !    minimum-thickness clamp used by npf_fc_swi; celltype forced to 1 so zeta
-    !    acts as the top surface
+    !    minimum-thickness clamp; celltype forced to 1 so zeta acts as the top
     ictn = 1
     ictm = 1
     call swi_thksat(n, tn, bn, this%swi%zeta(n), satn_s, npf%inewton)
@@ -1593,13 +1561,30 @@ contains
                    npf%dis%con%cl1(jas), npf%dis%con%cl2(jas), &
                    npf%dis%con%hwva(jas))
     !
-    ! -- fluid conductance: freshwater slab (S^w - S^s, between zeta and the
-    !    water table) or saltwater slab (S^s, between the bottom and zeta)
     if (this%swi%isaltwater == 1) then
       condf = condsw
     else
       condf = cond - condsw
     end if
+  end function swinpf_condf
+
+  subroutine swinpf_fc(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
+    class(SwiNpfFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: n
+    integer(I4B), intent(in) :: m
+    integer(I4B), intent(in) :: ipos
+    class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
+    real(DP), dimension(:), intent(inout) :: rhs
+    integer(I4B), dimension(:), intent(in) :: idxglo
+    real(DP), dimension(:), intent(in) :: hnew
+    ! local
+    type(GwfNpfType), pointer :: npf
+    integer(I4B) :: idiag, isymcon, idiagm
+    real(DP) :: condf
+    !
+    npf => this%npf
+    if (npf%dis%con%ihc(npf%dis%con%jas(ipos)) == C3D_VERTICAL) return
+    condf = swinpf_condf(this, n, m, ipos, hnew)
     idiag = npf%dis%con%ia(n)
     isymcon = npf%dis%con%isym(ipos)
     idiagm = npf%dis%con%ia(m)
@@ -1680,7 +1665,10 @@ contains
     end if
   end subroutine swinpf_fn
 
-  !> @brief SWI NPF formulation: intercell flow (spike stub)
+  !> @brief SWI NPF formulation: intercell (FLOW-JA-FACE) flow for connection
+  !! ipos, using the same fluid-slab conductance as swinpf_fc so the cell-by-cell
+  !! flows are consistent with the matrix fill (and hence the CHD/GHB budgets,
+  !! which are recovered from the flowja residual). Horizontal only.
   !<
   subroutine swinpf_cq(this, n, m, ipos, flowja, h_new)
     class(SwiNpfFormulationType), intent(inout) :: this
@@ -1689,6 +1677,16 @@ contains
     integer(I4B), intent(in) :: ipos
     real(DP), dimension(:), intent(inout) :: flowja
     real(DP), dimension(:), intent(in) :: h_new
+    ! local
+    type(GwfNpfType), pointer :: npf
+    real(DP) :: condf, qnm
+    !
+    npf => this%npf
+    if (npf%dis%con%ihc(npf%dis%con%jas(ipos)) == C3D_VERTICAL) return
+    condf = swinpf_condf(this, n, m, ipos, h_new)
+    qnm = condf * (h_new(m) - h_new(n))
+    flowja(ipos) = qnm
+    flowja(npf%dis%con%isym(ipos)) = -qnm
   end subroutine swinpf_cq
 
   !> @brief SWI STO formulation: is this cell handled by SWI storage?
@@ -1727,6 +1725,11 @@ contains
     !
     sto => this%sto
     if (this%swi%ibound(n) < 1) return
+    ! -- saltwater model: storage over the salt column S^s (driven by h^s)
+    if (this%swi%isaltwater == 1) then
+      call swisto_fc_salt(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
+      return
+    end if
     tled = DONE / delt
     idiag = sto%dis%con%ia(n)
     tp = sto%dis%top(n)
@@ -1811,6 +1814,11 @@ contains
     !
     sto => this%sto
     if (this%swi%ibound(n) < 1) return
+    ! -- saltwater model: salt-column interface tangent (driven by h^s)
+    if (this%swi%isaltwater == 1) then
+      call swisto_fn_salt(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
+      return
+    end if
     !
     ! -- water column (S^w): standard STO default Newton tangent (upgrades the
     !    fc_default_sto chord)
@@ -1862,6 +1870,11 @@ contains
     !
     sto => this%sto
     this%swi%storage(n) = DZERO
+    ! -- saltwater model: storage over the salt column S^s (driven by h^s)
+    if (this%swi%isaltwater == 1) then
+      call swisto_cq_salt(this, n, flowja, h_new, h_old)
+      return
+    end if
     ! -- water column (S^w): standard STO default rate (fills strgss/strgsy)
     call sto%cq_default_sto(n, flowja, h_new, h_old)
     if (sto%iss == 1) return
@@ -1911,6 +1924,176 @@ contains
     this%swi%storage(n) = -rate_s
     flowja(idiag) = flowja(idiag) + this%swi%storage(n)
   end subroutine swisto_cq
+
+  !> @brief SWI STO formulation (saltwater model): storage fill for cell n. The
+  !! saltwater storage is over the salt column S^s = sat(zeta), which is
+  !! bottom-referenced and driven by h^s (dzeta/dh^s = alphas). Residual-consistent
+  !! chord in fc; the smoothed interface tangent is added in swisto_fn_salt.
+  !<
+  subroutine swisto_fc_salt(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
+    use TdisModule, only: delt
+    use GwfStorageUtilsModule, only: SsCapacity, SyCapacity, SsTerms
+    class(SwiStoFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: n
+    class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
+    real(DP), dimension(:), intent(inout) :: rhs
+    integer(I4B), dimension(:), intent(in) :: idxglo
+    real(DP), dimension(:), intent(in) :: h_old
+    real(DP), dimension(:), intent(in) :: h_new
+    ! local
+    type(GwfStoType), pointer :: sto
+    integer(I4B) :: idiag
+    real(DP) :: tled, tp, bt, tthk
+    real(DP) :: sc1, rho1, rho1old, sc2, rho2, rho2old
+    real(DP) :: ssnew, ssold, aterm, rhsterm, rate_s
+    !
+    sto => this%sto
+    tled = DONE / delt
+    idiag = sto%dis%con%ia(n)
+    tp = sto%dis%top(n)
+    bt = sto%dis%bot(n)
+    tthk = tp - bt
+    ssnew = sQuadraticSaturation(tp, bt, this%swi%get_zetanew(n), sto%satomega)
+    ssold = sQuadraticSaturation(tp, bt, this%swi%get_zetaold(n), sto%satomega)
+    !
+    ! -- compressible (Ss) over the salt column, driven by h^s
+    sc1 = SsCapacity(sto%istor_coef, tp, bt, sto%dis%area(n), sto%ss(n))
+    rho1 = sc1 * tled
+    if (sto%integratechanges /= 0) then
+      rho1old = SsCapacity(sto%istor_coef, tp, bt, sto%dis%area(n), &
+                           this%swi%oldss(n)) * tled
+    else
+      rho1old = rho1
+    end if
+    call SsTerms(sto%iconvert(n), sto%iorig_ss, sto%iconf_ss, tp, bt, &
+                 rho1, rho1old, ssnew, ssold, h_new(n), h_old(n), aterm, rhsterm)
+    call matrix_sln%add_value_pos(idxglo(idiag), aterm)
+    rhs(n) = rhs(n) + rhsterm
+    !
+    ! -- drainable (Sy) over the salt column, residual-consistent chord. The
+    !    residual contribution is +rate_s (the saltwater's own storage); the
+    !    chord diagonal d(rate_s)/dh^s ~ -alphas*rho2 (interior) is applied only
+    !    while the interface is within the cell.
+    sc2 = SyCapacity(sto%dis%area(n), this%swi%sy(n))
+    rho2 = sc2 * tled
+    if (sto%integratechanges /= 0) then
+      rho2old = SyCapacity(sto%dis%area(n), this%swi%oldsy(n)) * tled
+    else
+      rho2old = rho2
+    end if
+    rate_s = rho2old * tthk * ssold - rho2 * tthk * ssnew
+    if (ssnew > DZERO .and. ssnew < DONE) then
+      aterm = -rho2 * this%swi%alphas
+    else
+      aterm = DZERO
+    end if
+    rhsterm = aterm * h_new(n) - rate_s
+    call matrix_sln%add_value_pos(idxglo(idiag), aterm)
+    rhs(n) = rhs(n) + rhsterm
+  end subroutine swisto_fc_salt
+
+  !> @brief SWI STO formulation (saltwater model): storage Newton tangent for
+  !! cell n. Upgrades the salt-column chord diagonal in swisto_fc_salt to the
+  !! smoothed interface tangent (alphas chain rule). Newton only.
+  !<
+  subroutine swisto_fn_salt(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
+    use TdisModule, only: delt
+    use GwfStorageUtilsModule, only: SyCapacity
+    class(SwiStoFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: n
+    class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
+    real(DP), dimension(:), intent(inout) :: rhs
+    integer(I4B), dimension(:), intent(in) :: idxglo
+    real(DP), dimension(:), intent(in) :: h_old
+    real(DP), dimension(:), intent(in) :: h_new
+    ! local
+    type(GwfStoType), pointer :: sto
+    integer(I4B) :: idiag
+    real(DP) :: tled, tp, bt, tthk
+    real(DP) :: sc2, rho2, ssnew, sderiv, a_fn
+    !
+    sto => this%sto
+    tled = DONE / delt
+    idiag = sto%dis%con%ia(n)
+    tp = sto%dis%top(n)
+    bt = sto%dis%bot(n)
+    tthk = tp - bt
+    ssnew = sQuadraticSaturation(tp, bt, this%swi%get_zetanew(n), sto%satomega)
+    if (ssnew > DZERO .and. ssnew < DONE) then
+      sc2 = SyCapacity(sto%dis%area(n), this%swi%sy(n))
+      rho2 = sc2 * tled
+      sderiv = sQuadraticSaturationDerivative(tp, bt, this%swi%get_zetanew(n), &
+                                              sto%satomega)
+      ! net salt tangent d(rate_s)/dh^s = -alphas*rho2*tthk*sderiv; the fc chord
+      ! was -alphas*rho2, so the fn delta is alphas*rho2*(1 - tthk*sderiv)
+      a_fn = this%swi%alphas * rho2 * (DONE - tthk * sderiv)
+      call matrix_sln%add_value_pos(idxglo(idiag), a_fn)
+      rhs(n) = rhs(n) + a_fn * h_new(n)
+    end if
+  end subroutine swisto_fn_salt
+
+  !> @brief SWI STO formulation (saltwater model): storage rate for cell n. The
+  !! salt-column storage is the saltwater model's own storage, reported through
+  !! the STO storage arrays (strgss/strgsy) and flowja; there is no separate SWI
+  !! conversion term for the saltwater model (swi%storage stays zero).
+  !<
+  subroutine swisto_cq_salt(this, n, flowja, h_new, h_old)
+    use TdisModule, only: delt
+    use GwfStorageUtilsModule, only: SsCapacity, SyCapacity, SsTerms
+    class(SwiStoFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: n
+    real(DP), dimension(:), intent(inout) :: flowja
+    real(DP), dimension(:), intent(in) :: h_new
+    real(DP), dimension(:), intent(in) :: h_old
+    ! local
+    type(GwfStoType), pointer :: sto
+    integer(I4B) :: idiag
+    real(DP) :: tled, tp, bt, tthk
+    real(DP) :: sc1, rho1, rho1old, sc2, rho2, rho2old
+    real(DP) :: ssnew, ssold, aterm, rhsterm, ratess, ratesy
+    !
+    sto => this%sto
+    sto%strgss(n) = DZERO
+    sto%strgsy(n) = DZERO
+    if (sto%iss == 1) return
+    if (this%swi%ibound(n) < 1) return
+    tled = DONE / delt
+    idiag = sto%dis%con%ia(n)
+    tp = sto%dis%top(n)
+    bt = sto%dis%bot(n)
+    tthk = tp - bt
+    ssnew = sQuadraticSaturation(tp, bt, this%swi%get_zetanew(n), sto%satomega)
+    ssold = sQuadraticSaturation(tp, bt, this%swi%get_zetaold(n), sto%satomega)
+    !
+    ! -- compressible (Ss) rate
+    sc1 = SsCapacity(sto%istor_coef, tp, bt, sto%dis%area(n), sto%ss(n))
+    rho1 = sc1 * tled
+    if (sto%integratechanges /= 0) then
+      rho1old = SsCapacity(sto%istor_coef, tp, bt, sto%dis%area(n), &
+                           this%swi%oldss(n)) * tled
+    else
+      rho1old = rho1
+    end if
+    call SsTerms(sto%iconvert(n), sto%iorig_ss, sto%iconf_ss, tp, bt, &
+                 rho1, rho1old, ssnew, ssold, h_new(n), h_old(n), &
+                 aterm, rhsterm, ratess)
+    !
+    ! -- drainable (Sy) rate over the salt column
+    sc2 = SyCapacity(sto%dis%area(n), this%swi%sy(n))
+    rho2 = sc2 * tled
+    if (sto%integratechanges /= 0) then
+      rho2old = SyCapacity(sto%dis%area(n), this%swi%oldsy(n)) * tled
+    else
+      rho2old = rho2
+    end if
+    ratesy = rho2old * tthk * ssold - rho2 * tthk * ssnew
+    !
+    ! -- the saltwater storage is reported through the always-on SWI budget term
+    !    (matches how the freshwater interface storage is reported), so it does
+    !    not depend on the STO iusesy flag
+    this%swi%storage(n) = ratess + ratesy
+    flowja(idiag) = flowja(idiag) + this%swi%storage(n)
+  end subroutine swisto_cq_salt
 
   !> @brief SWI STO formulation: add SWI storage to the model budget
   !<
