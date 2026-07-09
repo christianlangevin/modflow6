@@ -237,6 +237,20 @@ contains
     if (this%insto > 0) then
       call mem_setptr(this%sy, 'SY', &
                       create_mem_path(this%name_model, 'STO'))
+      ! The SWI Package uses specific yield (SY) as the drainable porosity for
+      ! the interface-movement storage. A moving interface changes the freshwater
+      ! and saltwater storage even where the aquifer is confined, so SY is
+      ! required whenever the STO Package is active with SWI. STO zero-fills SY
+      ! when it is not provided, so an all-zero SY means it was not specified.
+      if (maxval(this%sy) <= DZERO) then
+        write (errmsg, '(a)') &
+          'The SWI Package requires that specific yield (SY) be specified in '// &
+          'the STO Package. A moving interface produces a drainable '// &
+          '(specific-yield) storage change in both the freshwater and '// &
+          'saltwater zones, even where the aquifer is confined.'
+        call store_error(errmsg, terminate=.false.)
+        call store_error_filename(this%input_fname)
+      end if
     end if
 
     ! If hfresh is not associated, then this swi package must not
