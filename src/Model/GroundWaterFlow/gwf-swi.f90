@@ -1121,9 +1121,12 @@ contains
 
   !> @brief SWI NPF formulation: fluid-slab conductance for connection ipos.
   !! Freshwater slab (S^w - S^s, between zeta and the water table) or saltwater
-  !! slab (S^s, between the bottom and zeta). Returns zero for vertical
-  !! connections (SWI overrides horizontal flow only). Shared by fc and cq so the
-  !! matrix fill and the cell-by-cell flow use the same conductance.
+  !! slab (S^s, between the bottom and zeta). The conductance follows the model's
+  !! Newton setting (via hcond): harmonic averaging for Picard, upstream weighting
+  !! for Newton. Floored at the conductance of a minimum-thickness slab to guard a
+  !! vanished fluid zone. Returns zero for vertical connections (SWI overrides
+  !! horizontal flow only). Shared by fc and cq so the matrix fill and the
+  !! cell-by-cell flow use the same conductance.
   !<
   function swinpf_condf(this, n, m, ipos, hnew) result(condf)
     class(SwiNpfFormulationType), intent(inout) :: this
@@ -1160,20 +1163,14 @@ contains
                  npf%dis%con%cl1(jas), npf%dis%con%cl2(jas), &
                  npf%dis%con%hwva(jas))
     !
-    ! -- saltwater-column (S^s) conductance below the interface (zeta), with the
-    !    minimum-thickness clamp; celltype forced to 1 so zeta acts as the top.
-    !    zeta is recomputed on the fly from the current heads (get_zetanew) so the
-    !    conductance is consistent with the storage terms and not lagged; the
-    !    minimum-thickness clamp handles a zeta below bottom (equivalent to the
-    !    old clamp of the stored zeta array).
+    ! -- saltwater-column (S^s) conductance below the interface (zeta); celltype
+    !    forced to 1 so zeta acts as the top surface. zeta is recomputed on the
+    !    fly from the current heads (get_zetanew) so the conductance is consistent
+    !    with the storage terms and not lagged.
     ictn = 1
     ictm = 1
     call swi_thksat(n, tn, bn, this%swi%get_zetanew(n), satn_s, npf%inewton)
-    if (satn_s * tthkn <= ZONE_MINIMUM_THICKNESS) &
-      satn_s = ZONE_MINIMUM_THICKNESS / tthkn
     call swi_thksat(m, tm, bm, this%swi%get_zetanew(m), satm_s, npf%inewton)
-    if (satm_s * tthkm <= ZONE_MINIMUM_THICKNESS) &
-      satm_s = ZONE_MINIMUM_THICKNESS / tthkm
     condsw = hcond(npf%ibound(n), npf%ibound(m), ictn, ictm, npf%inewton, ihc, &
                    npf%icellavg, npf%condsat(jas), hnew(n), hnew(m), &
                    satn_s, satm_s, hyn, hym, tn, tm, bn, bm, &
@@ -1185,6 +1182,15 @@ contains
     else
       condf = cond - condsw
     end if
+    ! -- guard: floor the model's own fluid-slab conductance at the conductance of
+    !    a minimum-thickness slab (condsat scaled by ZONE_MINIMUM_THICKNESS/tthk).
+    !    Symmetric for both models, it keeps a fully drained fluid zone from
+    !    producing a zero/negative row -- a singular system, or an unphysical
+    !    negative conductance where S^s > S^w -- without perturbing normally
+    !    saturated cells. TODO: replacing this fixed threshold with proper
+    !    dry-zone handling would let ZONE_MINIMUM_THICKNESS be removed entirely.
+    condf = max(condf, npf%condsat(jas) * ZONE_MINIMUM_THICKNESS / &
+                min(tthkn, tthkm))
   end function swinpf_condf
 
   subroutine swinpf_fc(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
