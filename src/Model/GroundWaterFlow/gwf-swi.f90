@@ -384,8 +384,9 @@ contains
     integer(I4B) :: inwt
     ! formats
     !
-    ! fill zeta
-    call this%update_zeta()
+    ! zeta is a pure function of the current heads and is computed on the fly
+    ! (get_zetanew) wherever the solve needs it; the stored zeta array is a
+    ! derived output/introspection quantity refreshed post-convergence in swi_cq.
     !
     ! Horizontal fresh/saltwater flow is filled by the SwiNpfFormulationType
     ! flow formulation (swinpf_fc/fn/cq, dispatched from NPF). Vertical saltwater
@@ -435,11 +436,10 @@ contains
   subroutine swi_cc(this)
     ! dummy
     class(GwfSwiType) :: this
-    ! local
-
-    ! recalculate zeta
-    call this%update_zeta()
-
+    !
+    ! No-op: zeta is computed on the fly from the heads during the solve; the
+    ! stored zeta array is refreshed post-convergence in swi_cq (for output and
+    ! API introspection), so no convergence-time recalculation is needed here.
   end subroutine swi_cc
 
   !> @ brief Calculate flows and storages for SWI package and adjust flowja
@@ -454,12 +454,17 @@ contains
     type(GwfNpfType), intent(in) :: npf
     type(GwfStoType), intent(in) :: sto
     !
-    ! Intercell freshwater/saltwater flows (FLOW-JA-FACE) are now assembled by the
-    ! SWI NPF formulation (swinpf_cq, dispatched from npf_cq), consistent with the
-    ! matrix fill in swinpf_fc; storage flows are assembled by the SWI STO
-    ! formulation (swisto_cq). Nothing to add here for horizontal SWI flow;
-    ! vertical saltwater flow cq is future work.
-    return
+    ! Refresh the stored zeta array from the converged heads. zeta is not used by
+    ! the solve (it is computed on the fly via get_zetanew wherever needed); the
+    ! stored array is a derived quantity kept current here -- once per time step,
+    ! post-convergence, before the budget/output phases -- so it can be written to
+    ! the zeta output file (swi_ot_dv) and inspected by API/BMI users.
+    call this%update_zeta()
+    !
+    ! Intercell freshwater/saltwater flows (FLOW-JA-FACE) are assembled by the SWI
+    ! NPF formulation (swinpf_cq, dispatched from npf_cq), consistent with the
+    ! matrix fill in swinpf_fc; storage flows by the SWI STO formulation
+    ! (swisto_cq). Vertical saltwater flow cq is future work.
   end subroutine swi_cq
 
   !> @ brief Model budget calculation for package
@@ -1160,13 +1165,17 @@ contains
                  npf%dis%con%hwva(jas))
     !
     ! -- saltwater-column (S^s) conductance below the interface (zeta), with the
-    !    minimum-thickness clamp; celltype forced to 1 so zeta acts as the top
+    !    minimum-thickness clamp; celltype forced to 1 so zeta acts as the top.
+    !    zeta is recomputed on the fly from the current heads (get_zetanew) so the
+    !    conductance is consistent with the storage terms and not lagged; the
+    !    minimum-thickness clamp handles a zeta below bottom (equivalent to the
+    !    old clamp of the stored zeta array).
     ictn = 1
     ictm = 1
-    call swi_thksat(n, tn, bn, this%swi%zeta(n), satn_s, npf%inewton)
+    call swi_thksat(n, tn, bn, this%swi%get_zetanew(n), satn_s, npf%inewton)
     if (satn_s * tthkn <= ZONE_MINIMUM_THICKNESS) &
       satn_s = ZONE_MINIMUM_THICKNESS / tthkn
-    call swi_thksat(m, tm, bm, this%swi%zeta(m), satm_s, npf%inewton)
+    call swi_thksat(m, tm, bm, this%swi%get_zetanew(m), satm_s, npf%inewton)
     if (satm_s * tthkm <= ZONE_MINIMUM_THICKNESS) &
       satm_s = ZONE_MINIMUM_THICKNESS / tthkm
     condsw = hcond(npf%ibound(n), npf%ibound(m), ictn, ictm, npf%inewton, ihc, &
