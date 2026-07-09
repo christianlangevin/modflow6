@@ -481,7 +481,6 @@ contains
     class(BndType), pointer :: packobj
     integer(I4B) :: ip
     integer(I4B) :: inwt, inwtsto, inwtcsub, inwtpak
-    logical :: is_fresh
     !
     ! -- newton flags
     inwt = inwtflag
@@ -495,26 +494,20 @@ contains
       if (inwtflag == 1) inwtcsub = this%csub%inewton
     end if
     !
-    ! -- Fill standard conductance terms
-    is_fresh = .true.
-    if (this%inswi > 0) then
-      if (this%swi%isaltwater == 1) is_fresh = .false.
-    end if
-    if (is_fresh) then
-      if (this%innpf > 0) call this%npf%npf_fc(kiter, matrix_sln, this%idxglo, &
-                                               this%rhs, this%x)
-    end if
+    ! -- Fill standard conductance terms. Both the freshwater and saltwater SWI
+    !    models now assemble their own equations through the NPF/STO flow
+    !    formulations (dispatched per connection/cell), so no is_fresh gating.
+    if (this%innpf > 0) call this%npf%npf_fc(kiter, matrix_sln, this%idxglo, &
+                                             this%rhs, this%x)
     if (this%inbuy > 0) call this%buy%buy_fc(kiter, matrix_sln, this%idxglo, &
                                              this%rhs, this%x)
     if (this%inhfb > 0) call this%hfb%hfb_fc(kiter, matrix_sln, this%idxglo, &
                                              this%rhs, this%x)
     if (this%ingnc > 0) call this%gnc%gnc_fc(kiter, matrix_sln)
     ! -- storage
-    if (is_fresh) then
     if (this%insto > 0) then
       call this%sto%sto_fc(kiter, this%xold, this%x, matrix_sln, &
                            this%idxglo, this%rhs)
-    end if
     end if
     ! -- skeletal storage, compaction, and land subsidence
     if (this%incsub > 0) then
@@ -537,31 +530,25 @@ contains
     !--Fill newton terms
     if (this%innpf > 0) then
       if (inwt /= 0) then
-      if (is_fresh) then
         call this%npf%npf_fn(kiter, matrix_sln, this%idxglo, this%rhs, this%x)
-      end if
       end if
     end if
     !
     ! -- Fill newton terms for ghost nodes
     if (this%ingnc > 0) then
       if (inwt /= 0) then
-      if (is_fresh) then
         call this%gnc%gnc_fn(kiter, matrix_sln, this%npf%condsat, &
                              ivarcv_opt=this%npf%ivarcv, &
                              ictm1_opt=this%npf%icelltype, &
                              ictm2_opt=this%npf%icelltype)
-      end if
       end if
     end if
     !
     ! -- Fill newton terms for storage
     if (this%insto > 0) then
       if (inwtsto /= 0) then
-      if (is_fresh) then
         call this%sto%sto_fn(kiter, this%xold, this%x, matrix_sln, &
                              this%idxglo, this%rhs)
-      end if
       end if
     end if
     !
@@ -791,13 +778,6 @@ contains
     integer(I4B) :: i
     integer(I4B) :: ip
     class(BndType), pointer :: packobj
-    logical :: is_fresh
-
-    ! initialize
-    is_fresh = .true.
-    if (this%inswi > 0) then
-      if (this%swi%isaltwater == 1) is_fresh = .false.
-    end if
 
     !
     ! -- Construct the flowja array.  Flowja is calculated each time, even if
@@ -808,15 +788,11 @@ contains
     do i = 1, this%nja
       this%flowja(i) = DZERO
     end do
-    if (is_fresh) then
-      if (this%innpf > 0) call this%npf%npf_cq(this%x, this%flowja)
-    end if
+    if (this%innpf > 0) call this%npf%npf_cq(this%x, this%flowja)
     if (this%inbuy > 0) call this%buy%buy_cq(this%x, this%flowja)
     if (this%inhfb > 0) call this%hfb%hfb_cq(this%x, this%flowja)
     if (this%ingnc > 0) call this%gnc%gnc_cq(this%flowja)
-    if (is_fresh) then
-      if (this%insto > 0) call this%sto%sto_cq(this%flowja, this%x, this%xold)
-    end if
+    if (this%insto > 0) call this%sto%sto_cq(this%flowja, this%x, this%xold)
     if (this%incsub > 0) call this%csub%csub_cq(this%dis%nodes, this%x, &
                                                 this%xold, isuppress_output, &
                                                 this%flowja)

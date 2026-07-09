@@ -1593,8 +1593,13 @@ contains
                    npf%dis%con%cl1(jas), npf%dis%con%cl2(jas), &
                    npf%dis%con%hwva(jas))
     !
-    ! -- freshwater conductance and fill (same sign pattern as fc_default_flow)
-    condf = cond - condsw
+    ! -- fluid conductance: freshwater slab (S^w - S^s, between zeta and the
+    !    water table) or saltwater slab (S^s, between the bottom and zeta)
+    if (this%swi%isaltwater == 1) then
+      condf = condsw
+    else
+      condf = cond - condsw
+    end if
     idiag = npf%dis%con%ia(n)
     isymcon = npf%dis%con%isym(ipos)
     idiagm = npf%dis%con%ia(m)
@@ -1640,14 +1645,21 @@ contains
       topup = min(npf%dis%top(n), npf%dis%top(m))
       botup = max(npf%dis%bot(n), npf%dis%bot(m))
     end if
-    ! saturated conductance and the freshwater saturation derivative
+    ! saturated conductance and the fluid saturation derivative of the upstream
+    ! cell: freshwater dS^f/dh^f = S'(h) + alphaf*S'(zeta); saltwater
+    ! dS^s/dh^s = alphas*S'(zeta)
     cond = npf%condsat(jas)
     consterm = -cond * (hnew(iups) - hnew(idn))
     zetaup = this%swi%get_zetanew(iups)
-    derv = sQuadraticSaturationDerivative(topup, botup, hnew(iups), &
-                                          npf%satomega) + &
-           this%swi%alphaf * &
-           sQuadraticSaturationDerivative(topup, botup, zetaup, npf%satomega)
+    if (this%swi%isaltwater == 1) then
+      derv = this%swi%alphas * &
+             sQuadraticSaturationDerivative(topup, botup, zetaup, npf%satomega)
+    else
+      derv = sQuadraticSaturationDerivative(topup, botup, hnew(iups), &
+                                            npf%satomega) + &
+             this%swi%alphaf * &
+             sQuadraticSaturationDerivative(topup, botup, zetaup, npf%satomega)
+    end if
     idiagm = npf%dis%con%ia(m)
     if (iups == n) then
       term = consterm * derv
