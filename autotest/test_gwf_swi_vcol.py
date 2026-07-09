@@ -106,20 +106,35 @@ def _zeta(test):
 
 def plot_output(idx, test):
     import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
 
-    ws = test.workspace
-    times, z = _zeta(test)
-    zeta = z[:, 0]  # top cell (interface is flat)
+    ws = pl.Path(test.workspace)
+    # per-cell (clamped) interface: each cell splits into freshwater (blue,
+    # above zeta) and saltwater (red, below zeta) using the .zta output
+    zobj = flopy.utils.HeadFile(ws / "mymodel.zta", text="zeta")
+    times = zobj.times
+    cell_top = np.array([top] + list(botm[:-1]))
+    cell_bot = np.array(botm)
 
-    fig, ax = plt.subplots(figsize=(7, 4))
-    for b in [top] + list(botm):
-        ax.axhline(b, color="0.6", ls=":", lw=0.8)
-    ax.plot(times, zeta, "k.-", label="interface (zeta)")
-    ax.set_xlabel("time")
-    ax.set_ylabel("elevation")
-    ax.set_ylim(botm[-1], top)
-    ax.set_title("SWI vertical column (single fluid): interface down then up")
-    ax.legend(loc="lower left")
+    snap = np.linspace(0, len(times) - 1, 9).round().astype(int)
+    fig = plt.figure(figsize=(12, 3.2))
+    for j, ti in enumerate(snap):
+        ax = fig.add_subplot(1, len(snap), j + 1)
+        zeta = zobj.get_data(totim=times[ti]).flatten()
+        for k in range(nlay):
+            z = min(max(zeta[k], cell_bot[k]), cell_top[k])
+            ax.add_patch(Rectangle((0, cell_bot[k]), 1.0, z - cell_bot[k],
+                                   facecolor="red", edgecolor="k", lw=0.5))
+            ax.add_patch(Rectangle((0, z), 1.0, cell_top[k] - z,
+                                   facecolor="blue", edgecolor="k", lw=0.5))
+        ax.set_ylim(botm[-1], top)
+        ax.set_xlim(0, 1)
+        ax.set_aspect("equal")
+        ax.set_xticks([])
+        ax.set_title(f"t={times[ti]:.0f}", fontsize=9)
+        if j > 0:
+            ax.set_yticklabels([])
+    fig.suptitle("SWI vertical column (single fluid): fresh (blue) / salt (red)")
     fig.tight_layout()
     fig.savefig(ws / "interface.png", dpi=150)
     plt.close("all")
