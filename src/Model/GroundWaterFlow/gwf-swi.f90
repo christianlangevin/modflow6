@@ -1119,10 +1119,6 @@ contains
     integer(I4B), intent(in) :: n
   end subroutine swinpf_cf
 
-  !> @brief SWI NPF formulation: fill the freshwater conductance for connection
-  !! n-m, overriding the default NPF term. condf = cond(S^w) - cond(S^s), i.e. the
-  !! conductance based on the freshwater column between the interface and the head.
-  !<
   !> @brief SWI NPF formulation: fluid-slab conductance for connection ipos.
   !! Freshwater slab (S^w - S^s, between zeta and the water table) or saltwater
   !! slab (S^s, between the bottom and zeta). Returns zero for vertical
