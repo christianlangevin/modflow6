@@ -1215,7 +1215,15 @@ contains
     !
     npf => this%npf
     jas = npf%dis%con%jas(ipos)
-    ! horizontal connections only (SWI single-fluid)
+    ! Vertical connections use no Newton term (Picard only). A Newton term for
+    ! the two-fluid buoyancy-gated vertical conductance was implemented and
+    ! tested (the gate factor depends on both connected heads, via the smoothed
+    ! flow-direction switch and, through zeta, the interface-at-face switch). It
+    ! did not materially improve convergence -- outer-iteration counts were
+    ! within a few percent of Picard (and slightly higher) across interface
+    ! speeds of 0.1-0.4 m/step, with and without under-relaxation -- because the
+    ! vertical gate is not the convergence bottleneck (interface storage is). It
+    ! was therefore not included. Single-fluid vertical flow is ungated.
     if (npf%dis%con%ihc(jas) == C3D_VERTICAL) return
     idiag = npf%dis%con%ia(n)
     isymcon = npf%dis%con%isym(ipos)
