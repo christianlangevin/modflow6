@@ -494,9 +494,7 @@ contains
       if (inwtflag == 1) inwtcsub = this%csub%inewton
     end if
     !
-    ! -- Fill standard conductance terms. Both the freshwater and saltwater SWI
-    !    models now assemble their own equations through the NPF/STO flow
-    !    formulations (dispatched per connection/cell), so no is_fresh gating.
+    ! -- Fill standard conductance terms
     if (this%innpf > 0) call this%npf%npf_fc(kiter, matrix_sln, this%idxglo, &
                                              this%rhs, this%x)
     if (this%inbuy > 0) call this%buy%buy_fc(kiter, matrix_sln, this%idxglo, &
@@ -515,13 +513,6 @@ contains
                              this%idxglo, this%rhs)
     end if
     if (this%inmvr > 0) call this%mvr%mvr_fc()
-    !
-    ! -- swi -----
-    ! --zeroes out Picard flow and storage terms for saltwater equation
-    if (this%inswi > 0) then
-      call this%swi%swi_fc(kiter, this%xold, this%x, matrix_sln, &
-                           this%idxglo, this%rhs, this%npf, this%sto, inwt)
-    end if
     do ip = 1, this%bndlist%Count()
       packobj => GetBndFromList(this%bndlist, ip)
       call packobj%bnd_fc(this%rhs, this%ia, this%idxglo, matrix_sln)
@@ -557,14 +548,6 @@ contains
       if (inwtcsub /= 0) then
         call this%csub%csub_fn(kiter, this%xold, this%x, matrix_sln, &
                                this%idxglo, this%rhs)
-      end if
-    end if
-    !
-    !--Fill newton terms for SWI
-    if (this%inswi > 0) then
-      if (inwt /= 0) then
-        call this%swi%swi_fn(kiter, matrix_sln, this%idxglo, &
-                             this%rhs, this%x, this%xold, this%npf, this%sto)
       end if
     end if
     !
@@ -609,11 +592,6 @@ contains
       call this%csub%csub_cc(innertot, kiter, iend, icnvgmod, &
                              this%dis%nodes, this%x, this%xold, &
                              cpak, ipak, dpak)
-    end if
-    !
-    ! -- If swi is on, then recalculate zeta
-    if (this%inswi > 0) then
-      call this%swi%swi_cc()
     end if
     !
     ! -- Call package cc routines
@@ -778,7 +756,6 @@ contains
     integer(I4B) :: i
     integer(I4B) :: ip
     class(BndType), pointer :: packobj
-
     !
     ! -- Construct the flowja array.  Flowja is calculated each time, even if
     !    output is suppressed.  (flowja is positive into a cell.)  The diagonal
@@ -842,8 +819,6 @@ contains
     if (this%insto > 0) call this%sto%sto_bd(isuppress_output, this%budget)
     if (this%incsub > 0) call this%csub%csub_bd(isuppress_output, this%budget)
     if (this%inmvr > 0) call this%mvr%mvr_bd()
-    ! SPIKE: SWI storage budget now added by the SwiStoFormulationType%bd,
-    ! called from sto_bd. (was: call this%swi%swi_bd(...))
     do ip = 1, this%bndlist%Count()
       packobj => GetBndFromList(this%bndlist, ip)
       call packobj%bnd_bd(this%budget)
@@ -963,10 +938,7 @@ contains
       packobj => GetBndFromList(this%bndlist, ip)
       call packobj%bnd_ot_model_flows(icbcfl=icbcfl, ibudfl=0, icbcun=icbcun)
     end do
-    ! SPIKE: SWI storage cell-by-cell flows now saved by
-    ! SwiStoFormulationType%save_flows, called from sto_save_model_flows.
-    ! (was: call this%swi%swi_save_model_flows(icbcfl, icbcun))
-    !
+
     ! -- Save advanced package flows
     do ip = 1, this%bndlist%Count()
       packobj => GetBndFromList(this%bndlist, ip)
@@ -1018,7 +990,7 @@ contains
       call this%vsc%vsc_ot_dv(idvsave)
     end if
     !
-    ! -- save density to binary file
+    ! -- save zeta to binary file
     if (this%inswi > 0) then
       call this%swi%swi_ot_dv(idvsave)
     end if

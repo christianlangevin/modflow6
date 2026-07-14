@@ -80,12 +80,7 @@ module GwfSwiModule
     procedure :: swi_ar
     procedure :: swi_rp
     procedure :: swi_ad
-    procedure :: swi_fc
-    procedure :: swi_fn
-    procedure :: swi_cc
     procedure :: swi_cq
-    procedure :: swi_bd
-    procedure :: swi_save_model_flows
     procedure :: swi_ot_dv
     procedure :: swi_da
     procedure, private :: swi_load
@@ -363,80 +358,6 @@ contains
 
   end subroutine swi_ad
 
-  !> @ brief Fill A and right-hand side for the package
-  !!
-  !!  Fill the coefficient matrix and right-hand side
-  !!
-  !<
-  subroutine swi_fc(this, kiter, hold, hnew, matrix_sln, idxglo, rhs, npf, &
-                    sto, inwt)
-    ! modules
-    ! dummy variables
-    class(GwfSwiType) :: this !< GwfSwiType object
-    integer(I4B), intent(in) :: kiter !< outer iteration number
-    real(DP), intent(in), dimension(:) :: hold !< previous heads
-    real(DP), intent(in), dimension(:) :: hnew !< current heads
-    class(MatrixBaseType), pointer :: matrix_sln !< A matrix
-    integer(I4B), intent(in), dimension(:) :: idxglo !< global index model to solution
-    real(DP), intent(inout), dimension(:) :: rhs !< right-hand side
-    type(GwfNpfType), intent(in) :: npf
-    type(GwfStoType), intent(in) :: sto
-    ! local variables
-    integer(I4B) :: inwt
-    ! formats
-    !
-    ! zeta is a pure function of the current heads and is computed on the fly
-    ! (get_zetanew) wherever the solve needs it; the stored zeta array is a
-    ! derived output/introspection quantity refreshed post-convergence in swi_cq.
-    !
-    ! Both horizontal and vertical fresh/saltwater flow are filled by the
-    ! SwiNpfFormulationType flow formulation (swinpf_fc/fn/cq, dispatched from
-    ! NPF for all flagged connections): the fluid-slab conductance for horizontal
-    ! connections and the buoyancy-restricted conductance for vertical connections.
-    !
-    ! Storage is assembled by the SWI STO formulation (swisto_fc), dispatched
-    ! from sto_fc for the flagged SWI_STORAGE cells -- no bolt-on correction here.
-    !
-    ! return
-    return
-  end subroutine swi_fc
-
-  subroutine swi_fn(this, kiter, matrix_sln, idxglo, rhs, hnew, hold, npf, sto)
-    ! dummy
-    class(GwfSwiType) :: this
-    integer(I4B) :: kiter
-    class(MatrixBaseType), pointer :: matrix_sln
-    integer(I4B), intent(in), dimension(:) :: idxglo
-    real(DP), intent(inout), dimension(:) :: rhs
-    real(DP), intent(inout), dimension(:) :: hnew
-    real(DP), intent(inout), dimension(:) :: hold
-    type(GwfNpfType) :: npf
-    type(GwfStoType) :: sto
-    !
-    ! Flow Newton terms are filled by the SWI NPF formulation (swinpf_fn) and
-    ! storage Newton terms by the SWI STO formulation (swisto_fn), both dispatched
-    ! from the model. This routine is a no-op. Note swinpf_fn returns early for
-    ! vertical connections, so the buoyancy-restricted vertical conductance is
-    ! treated Picard-style: a smoothed-tangent Newton term for it was implemented
-    ! and tested but gave no convergence benefit (interface storage, not the
-    ! vertical restriction, is the bottleneck), so it was intentionally dropped
-    ! (see swinpf_fn).
-
-  end subroutine swi_fn
-
-  !-----------------------------------------------
-  !
-  !> @brief convergence check
-  !<
-  subroutine swi_cc(this)
-    ! dummy
-    class(GwfSwiType) :: this
-    !
-    ! No-op: zeta is computed on the fly from the heads during the solve; the
-    ! stored zeta array is refreshed post-convergence in swi_cq (for output and
-    ! API introspection), so no convergence-time recalculation is needed here.
-  end subroutine swi_cc
-
   !> @ brief Calculate flows and storages for SWI package and adjust flowja
   !!
   !<
@@ -464,74 +385,6 @@ contains
     ! buoyancy-restricted conductance (test_gwf_swi_vcol2 exercises an all-vertical
     ! saltwater column and confirms the budget balances).
   end subroutine swi_cq
-
-  !> @ brief Model budget calculation for package
-  !!
-  !!  Budget calculation for the STO package components. Components include
-  !!  specific storage and specific yield storage.
-  !!
-  !<
-  subroutine swi_bd(this, isuppress_output, model_budget)
-    ! modules
-    use TdisModule, only: delt
-    use BudgetModule, only: BudgetType, rate_accumulator
-    ! dummy variables
-    class(GwfSwiType) :: this !< GwfSwiType object
-    integer(I4B), intent(in) :: isuppress_output !< flag to suppress model output
-    type(BudgetType), intent(inout) :: model_budget !< model budget object
-    ! local variables
-    real(DP) :: rin
-    real(DP) :: rout
-    !
-    ! Add swi storage rates to model budget
-    call rate_accumulator(this%storage, rin, rout)
-    call model_budget%addentry(rin, rout, delt, budtxt(1), &
-                               isuppress_output, '     SWI')
-    !
-    ! return
-    return
-  end subroutine swi_bd
-
-  !> @ brief Save model flows for package
-  !!
-  !!  Save cell-by-cell budget terms for the STO package.
-  !!
-  !<
-  subroutine swi_save_model_flows(this, icbcfl, icbcun)
-    ! dummy variables
-    class(GwfSwiType) :: this !< GwfSwiType object
-    integer(I4B), intent(in) :: icbcfl !< flag to output budget data
-    integer(I4B), intent(in) :: icbcun !< cell-by-cell file unit number
-    ! local variables
-    integer(I4B) :: ibinun
-    integer(I4B) :: iprint, nvaluesp, nwidthp
-    character(len=1) :: cdatafmp = ' ', editdesc = ' '
-    real(DP) :: dinact
-    !
-    ! Set unit number for binary output
-    if (this%ipakcb < 0) then
-      ibinun = icbcun
-    elseif (this%ipakcb == 0) then
-      ibinun = 0
-    else
-      ibinun = this%ipakcb
-    end if
-    if (icbcfl == 0) ibinun = 0
-    !
-    ! Record the storage rates if requested
-    if (ibinun /= 0) then
-      iprint = 0
-      dinact = DZERO
-      !
-      ! swi storage
-      call this%dis%record_array(this%storage, this%iout, iprint, -ibinun, &
-                                 budtxt(1), cdatafmp, nvaluesp, &
-                                 nwidthp, editdesc, dinact)
-    end if
-    !
-    ! return
-    return
-  end subroutine swi_save_model_flows
 
   !> @brief Save density array to binary file
   !<
