@@ -281,7 +281,8 @@ contains
       ! salt node to fresh nodes
       do n = 1, this%gwf_salt%dis%nodes
         iglo = n + this%gwf_salt%moffset
-        do ipos = this%gwf_fresh%dis%con%ia(n), this%gwf_fresh%dis%con%ia(n + 1) - 1
+        do ipos = this%gwf_fresh%dis%con%ia(n), &
+          this%gwf_fresh%dis%con%ia(n + 1) - 1
           m = this%gwf_fresh%dis%con%ja(ipos)
           jglo = m + this%gwf_fresh%moffset
           call sparse%addconnection(iglo, jglo, 1)
@@ -332,7 +333,8 @@ contains
       idx = 1
       do n = 1, this%gwf_salt%dis%nodes
         iglo = n + this%gwf_salt%moffset
-        do ipos = this%gwf_fresh%dis%con%ia(n), this%gwf_fresh%dis%con%ia(n + 1) - 1
+        do ipos = this%gwf_fresh%dis%con%ia(n), &
+          this%gwf_fresh%dis%con%ia(n + 1) - 1
           m = this%gwf_fresh%dis%con%ja(ipos)
           jglo = m + this%gwf_fresh%moffset
           this%idxjafresh(idx) = matrix_sln%get_position(iglo, jglo)
@@ -410,7 +412,7 @@ contains
       if (inwtflag == 0) inwt = 0
     end if
     if (inwt /= 0) then
-      call this%exg_fn(kiter, matrix_sln, rhs_sln)
+      call this%exg_fn(kiter, matrix_sln)
     end if
   end subroutine swi_swi_fc
 
@@ -422,22 +424,21 @@ contains
   !! convergence (the Picard residual uses the lagged other-fluid head in the
   !! model's own fc). Horizontal connections only; vertical flow is Picard.
   !<
-  subroutine swi_swi_fn(this, kiter, matrix_sln, rhs_sln)
+  subroutine swi_swi_fn(this, kiter, matrix_sln)
     ! dummy
     class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
     integer(I4B), intent(in) :: kiter
     class(MatrixBaseType), pointer :: matrix_sln
-    real(DP), dimension(:), intent(inout) :: rhs_sln
 
     ! -- cross-storage Jacobian is transient only; skip in a steady-state stress
     !    period. The cross-flow Jacobian below is not storage and applies always.
     !    Either can be turned off with a dev option (inocrossstorage/inocrossflow).
     if (this%inocrossstorage == 0 .and. this%gwf_fresh%iss == 0) then
-      call this%swi_fn_cross_storage(matrix_sln, rhs_sln)
+      call this%swi_fn_cross_storage(matrix_sln)
     end if
 
     if (this%inocrossflow == 0) then
-      call this%swi_fn_cross_flow(matrix_sln, rhs_sln)
+      call this%swi_fn_cross_flow(matrix_sln)
     end if
 
   end subroutine swi_swi_fn
@@ -447,18 +448,15 @@ contains
   !! d(freshwater storage)/d(hs) and d(saltwater storage)/d(hf) from interface
   !! movement, on the same-cell fresh<->salt coupling positions.
   !<
-  subroutine swi_fn_cross_storage(this, matrix_sln, rhs_sln)
+  subroutine swi_fn_cross_storage(this, matrix_sln)
     ! dummy
     class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
     class(MatrixBaseType), pointer :: matrix_sln
-    real(DP), dimension(:), intent(inout) :: rhs_sln
     ! local
-    integer(I4B) :: n, iglo, jglo
+    integer(I4B) :: n
     real(DP) :: termf, terms, rtermf, rterms
 
     do n = 1, this%nexg
-      iglo = n + this%gwf_fresh%moffset
-      jglo = n + this%gwf_salt%moffset
       termf = DZERO
       rtermf = DZERO
       terms = DZERO
@@ -472,8 +470,8 @@ contains
       call matrix_sln%add_value_pos(this%idxsymglo(n), terms)
 
       ! update rhs for the fresh and salt model nodes
-      rhs_sln(iglo) = rhs_sln(iglo) + rtermf
-      rhs_sln(jglo) = rhs_sln(jglo) + rterms
+      this%gwf_fresh%rhs(n) = this%gwf_fresh%rhs(n) + rtermf
+      this%gwf_salt%rhs(n) = this%gwf_salt%rhs(n) + rterms
     end do
 
   end subroutine swi_fn_cross_storage
@@ -485,20 +483,18 @@ contains
   !! flow is Picard). For each connection the derivative is evaluated at the
   !! upstream cell and lands on that cell's fresh<->salt coupling position.
   !<
-  subroutine swi_fn_cross_flow(this, matrix_sln, rhs_sln)
+  subroutine swi_fn_cross_flow(this, matrix_sln)
     ! dummy
     class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
     class(MatrixBaseType), pointer :: matrix_sln
-    real(DP), dimension(:), intent(inout) :: rhs_sln
     ! local
-    integer(I4B) :: n, iglo, ipos, m, idx, ihc
+    integer(I4B) :: n, ipos, m, idx, ihc
     real(DP) :: termf, terms, csat, q
 
     ! FRESHWATER EQUATIONS: the saltwater head in a connected cell affects the
     ! freshwater slab conductance, so it enters the freshwater equation.
     idx = 1
     do n = 1, this%gwf_fresh%dis%nodes
-      iglo = n + this%gwf_fresh%moffset
       do ipos = this%gwf_fresh%dis%con%ia(n), &
         this%gwf_fresh%dis%con%ia(n + 1) - 1
         ihc = this%gwf_fresh%npf%dis%con%ihc( &
@@ -514,12 +510,14 @@ contains
           ! m is upstream: hs(m) affects the conductance
           termf = this%get_dsfdhs(m, 2) * q
           call matrix_sln%add_value_pos(this%idxjasalt(idx), termf)
-          rhs_sln(iglo) = rhs_sln(iglo) + termf * this%gwf_salt%x(m)
+          this%gwf_fresh%rhs(n) = this%gwf_fresh%rhs(n) + &
+                                  termf * this%gwf_salt%x(m)
         else
           ! n is upstream: hs(n) affects the conductance
           termf = this%get_dsfdhs(n, 2) * q
           call matrix_sln%add_value_pos(this%idxglo(n), termf)
-          rhs_sln(iglo) = rhs_sln(iglo) + termf * this%gwf_salt%x(n)
+          this%gwf_fresh%rhs(n) = this%gwf_fresh%rhs(n) + &
+                                  termf * this%gwf_salt%x(n)
         end if
         idx = idx + 1
       end do
@@ -529,7 +527,6 @@ contains
     ! saltwater slab conductance, so it enters the saltwater equation.
     idx = 1
     do n = 1, this%gwf_salt%dis%nodes
-      iglo = n + this%gwf_salt%moffset
       do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
         ihc = this%gwf_salt%npf%dis%con%ihc(this%gwf_salt%npf%dis%con%jas(ipos))
         if (ihc == C3D_VERTICAL) then
@@ -543,12 +540,14 @@ contains
           ! m is upstream: hf(m) affects the conductance
           terms = this%get_dssdhf(m, 2) * q
           call matrix_sln%add_value_pos(this%idxjafresh(idx), terms)
-          rhs_sln(iglo) = rhs_sln(iglo) + terms * this%gwf_fresh%x(m)
+          this%gwf_salt%rhs(n) = this%gwf_salt%rhs(n) + &
+                                 terms * this%gwf_fresh%x(m)
         else
           ! n is upstream: hf(n) affects the conductance
           terms = this%get_dssdhf(n, 2) * q
           call matrix_sln%add_value_pos(this%idxsymglo(n), terms)
-          rhs_sln(iglo) = rhs_sln(iglo) + terms * this%gwf_fresh%x(n)
+          this%gwf_salt%rhs(n) = this%gwf_salt%rhs(n) + &
+                                 terms * this%gwf_fresh%x(n)
         end if
         idx = idx + 1
       end do
