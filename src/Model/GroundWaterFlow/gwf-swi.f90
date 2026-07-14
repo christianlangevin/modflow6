@@ -415,9 +415,11 @@ contains
     !
     ! Flow Newton terms are filled by the SWI NPF formulation (swinpf_fn) and
     ! storage Newton terms by the SWI STO formulation (swisto_fn), both dispatched
-    ! from the model. This routine is a no-op. Note swinpf_fn currently returns
-    ! early for vertical connections, so the buoyancy-gated vertical conductance
-    ! is treated Picard-style (its smoothed-tangent Newton term is future work).
+    ! from the model. This routine is a no-op. Note swinpf_fn returns early for
+    ! vertical connections, so the buoyancy-gated vertical conductance is treated
+    ! Picard-style: a smoothed-tangent Newton term for it was implemented and
+    ! tested but gave no convergence benefit (interface storage, not the vertical
+    ! gate, is the bottleneck), so it was intentionally dropped (see swinpf_fn).
 
   end subroutine swi_fn
 
@@ -456,7 +458,10 @@ contains
     ! Intercell freshwater/saltwater flows (FLOW-JA-FACE) are assembled by the SWI
     ! NPF formulation (swinpf_cq, dispatched from npf_cq), consistent with the
     ! matrix fill in swinpf_fc; storage flows by the SWI STO formulation
-    ! (swisto_cq). Vertical saltwater flow cq is future work.
+    ! (swisto_cq). Both horizontal and vertical connections are handled: swinpf_cq
+    ! shares swinpf_condf with swinpf_fc, which routes vertical connections to the
+    ! buoyancy-gated conductance (test_gwf_swi_vcol2 exercises an all-vertical
+    ! saltwater column and confirms the budget balances).
   end subroutine swi_cq
 
   !> @ brief Model budget calculation for package
@@ -1276,7 +1281,9 @@ contains
   !> @brief SWI NPF formulation: intercell (FLOW-JA-FACE) flow for connection
   !! ipos, using the same fluid-slab conductance as swinpf_fc so the cell-by-cell
   !! flows are consistent with the matrix fill (and hence the CHD/GHB budgets,
-  !! which are recovered from the flowja residual). Horizontal only.
+  !! which are recovered from the flowja residual). Handles both horizontal and
+  !! vertical connections: swinpf_condf routes vertical connections to the
+  !! buoyancy-gated conductance (swinpf_vcondf).
   !<
   subroutine swinpf_cq(this, n, m, ipos, flowja, h_new)
     class(SwiNpfFormulationType), intent(inout) :: this

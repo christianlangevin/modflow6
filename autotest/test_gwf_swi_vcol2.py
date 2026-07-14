@@ -157,10 +157,26 @@ def plot_output(idx, test):
         zeta = zobj.get_data(totim=times[ti]).flatten()
         for k in range(nlay):
             z = min(max(zeta[k], cell_bot[k]), cell_top[k])
-            ax.add_patch(Rectangle((0, cell_bot[k]), 1.0, z - cell_bot[k],
-                                   facecolor="red", edgecolor="k", lw=0.5))
-            ax.add_patch(Rectangle((0, z), 1.0, cell_top[k] - z,
-                                   facecolor="blue", edgecolor="k", lw=0.5))
+            ax.add_patch(
+                Rectangle(
+                    (0, cell_bot[k]),
+                    1.0,
+                    z - cell_bot[k],
+                    facecolor="red",
+                    edgecolor="k",
+                    lw=0.5,
+                )
+            )
+            ax.add_patch(
+                Rectangle(
+                    (0, z),
+                    1.0,
+                    cell_top[k] - z,
+                    facecolor="blue",
+                    edgecolor="k",
+                    lw=0.5,
+                )
+            )
         ax.set_ylim(botm[-1], top)
         ax.set_xlim(0, 1)
         ax.set_aspect("equal")
@@ -202,6 +218,24 @@ def check_output(idx, test):
     assert zeta_p1.min() < -2.0, "interface should cross the -1 and -2 faces"
     assert abs(zeta[-1] - zeta0) < 0.1, (
         f"interface should return near {zeta0}, got {zeta[-1]}"
+    )
+
+    # -- quantitative vertical-flow rate: injecting freshwater volume q*t at the
+    #    top displaces the sharp interface downward as saltwater is pushed out the
+    #    bottom, and every unit of injected volume sweeps 1/(area*sy) of interface
+    #    descent. So the cumulative descent over the injection period must equal
+    #    the analytical q/(area*sy)*perlen. This pins the buoyancy-gated vertical
+    #    saltwater conductance quantitatively (a wrong vertical term would move the
+    #    interface at the wrong speed while still conserving mass). The small
+    #    excess is the interface smoothing as zeta crosses the two layer faces.
+    area = delr * delc
+    perlen = float(nstp)  # perioddata uses perlen == nstp with tsmult 1.0
+    descent = zeta0 - float(zeta_p1[-1])
+    descent_expected = q / (area * sy) * perlen
+    print(f"interface descent: observed={descent:.4f} expected={descent_expected:.4f}")
+    assert abs(descent - descent_expected) < 0.05 * descent_expected, (
+        f"interface descent {descent:.4f} should match q/(area*sy)*perlen "
+        f"= {descent_expected:.4f} (vertical saltwater flow rate)"
     )
 
     # -- both model budgets must conserve mass
