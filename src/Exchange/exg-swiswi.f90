@@ -63,6 +63,8 @@ module SwiSwiExchangeModule
     procedure :: exg_cf => swi_swi_cf
     procedure :: exg_fc => swi_swi_fc
     procedure :: exg_fn => swi_swi_fn
+    procedure :: swi_fn_cross_storage
+    procedure :: swi_fn_cross_flow
     procedure :: swi_cross_storage
     ! ! procedure :: exg_cq => swi_swi_cq
     ! ! procedure :: exg_bd => swi_swi_bd
@@ -416,24 +418,36 @@ contains
     class(MatrixBaseType), pointer :: matrix_sln
     real(DP), dimension(:), intent(inout) :: rhs_sln
     ! local
-    integer(I4B) :: n, iglo, jglo
-    integer(I4B) :: ipos, m, idx
-    integer(I4B) :: idxglopos, ihc
-    real(DP) :: termf
-    real(DP) :: terms
-    real(DP) :: rtermf
-    real(DP) :: rterms
-    real(DP) :: csat, q, dsfdhs, dssdhf, hfn, hfm, hsn, hsm
-
     integer(I4B) :: icross_storage = 1
     integer(I4B) :: icross_flow = 1
 
-    ! -- Put cross storage terms into amatsln and rhs. Storage is transient only,
-    !    so skip in a steady-state stress period. (The cross-flow terms below are
-    !    not storage and DO apply in steady state.)
+    ! -- cross-storage Jacobian is transient only; skip in a steady-state stress
+    !    period. The cross-flow Jacobian below is not storage and applies always.
     if (icross_storage == 1 .and. this%gwf_fresh%iss == 0) then
-    do n = 1, this%nexg
+      call this%swi_fn_cross_storage(matrix_sln, rhs_sln)
+    end if
 
+    if (icross_flow == 1) then
+      call this%swi_fn_cross_flow(matrix_sln, rhs_sln)
+    end if
+
+  end subroutine swi_swi_fn
+
+  !> @ brief Cross-fluid STORAGE Newton terms
+  !!
+  !! d(freshwater storage)/d(hs) and d(saltwater storage)/d(hf) from interface
+  !! movement, on the same-cell fresh<->salt coupling positions.
+  !<
+  subroutine swi_fn_cross_storage(this, matrix_sln, rhs_sln)
+    ! dummy
+    class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
+    class(MatrixBaseType), pointer :: matrix_sln
+    real(DP), dimension(:), intent(inout) :: rhs_sln
+    ! local
+    integer(I4B) :: n, iglo, jglo
+    real(DP) :: termf, terms, rtermf, rterms
+
+    do n = 1, this%nexg
       iglo = n + this%gwf_fresh%moffset
       jglo = n + this%gwf_salt%moffset
       termf = DZERO
@@ -441,153 +455,97 @@ contains
       terms = DZERO
       rterms = DZERO
 
-      ! call routine to calculate cross storage terms
+      ! calculate cross storage terms
       call this%swi_cross_storage(n, termf, rtermf, terms, rterms)
 
-      ! fill off-diagonal matrix coefficient
+      ! fill off-diagonal matrix coefficients
       call matrix_sln%add_value_pos(this%idxglo(n), termf)
       call matrix_sln%add_value_pos(this%idxsymglo(n), terms)
 
-      ! update rhs for fresh model and salt model nodes
+      ! update rhs for the fresh and salt model nodes
       rhs_sln(iglo) = rhs_sln(iglo) + rtermf
       rhs_sln(jglo) = rhs_sln(jglo) + rterms
-
     end do
-    end if
 
-    ! FRESHWATER EQUATIONS
-    ! go through each freshwater cell and evaluate effect of cross flow terms
-    ! in connected saltwater cells
-    if (icross_flow == 1) then
-      idx = 1
-      do n = 1, this%gwf_fresh%dis%nodes
-        iglo = n + this%gwf_fresh%moffset
-        do ipos = this%gwf_fresh%dis%con%ia(n), &
-          this%gwf_fresh%dis%con%ia(n + 1) - 1
+  end subroutine swi_fn_cross_storage
 
-          ihc = this%gwf_fresh%npf%dis%con%ihc( &
-                this%gwf_fresh%npf%dis%con%jas(ipos))
-          if (ihc == C3D_VERTICAL) then
-            idx = idx + 1
-            cycle
-          end if
+  !> @ brief Cross-fluid FLOW Newton terms
+  !!
+  !! d(freshwater flow)/d(hs) and d(saltwater flow)/d(hf) from the
+  !! interface-dependent slab conductance. Horizontal connections only (vertical
+  !! flow is Picard). For each connection the derivative is evaluated at the
+  !! upstream cell and lands on that cell's fresh<->salt coupling position.
+  !<
+  subroutine swi_fn_cross_flow(this, matrix_sln, rhs_sln)
+    ! dummy
+    class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
+    class(MatrixBaseType), pointer :: matrix_sln
+    real(DP), dimension(:), intent(inout) :: rhs_sln
+    ! local
+    integer(I4B) :: n, iglo, ipos, m, idx, ihc
+    real(DP) :: termf, terms, csat, q
 
-          m = this%gwf_fresh%dis%con%ja(ipos)
-          jglo = m + this%gwf_salt%moffset
-
-          termf = DZERO
-          rtermf = DZERO
-          hfn = this%gwf_fresh%x(n)
-          hfm = this%gwf_fresh%x(m)
-          csat = this%gwf_fresh%npf%condsat(this%gwf_fresh%npf%dis%con%jas(ipos))
-
-          if (hfm > hfn) then
-            ! Saltwater head in m affects n-m conductance so need to include derivative
-            ! term in freshwater equation
-            q = csat * (hfm - hfn)
-            dsfdhs = this%get_dsfdhs(m, 2)
-
-            ! amat contribution
-            termf = dsfdhs * q
-            idxglopos = this%idxglo(n)
-
-            ! rhs contribution
-            hsm = this%gwf_salt%x(m)
-            rtermf = termf * hsm
-
-            call matrix_sln%add_value_pos(this%idxjasalt(idx), termf)
-            rhs_sln(iglo) = rhs_sln(iglo) + rtermf
-
-          else
-
-            ! Saltwater head in n affects n-m conductance so need to include derivative
-            ! term in freshwater equation
-            q = csat * (hfm - hfn)
-            dsfdhs = this%get_dsfdhs(n, 2)
-
-            ! amat contribution
-            termf = dsfdhs * q
-
-            ! rhs contribution
-            hsn = this%gwf_salt%x(n)
-            rtermf = termf * hsn
-
-            call matrix_sln%add_value_pos(this%idxglo(n), termf)
-            rhs_sln(iglo) = rhs_sln(iglo) + rtermf
-
-          end if
-
-          ! increment counter for idx array
+    ! FRESHWATER EQUATIONS: the saltwater head in a connected cell affects the
+    ! freshwater slab conductance, so it enters the freshwater equation.
+    idx = 1
+    do n = 1, this%gwf_fresh%dis%nodes
+      iglo = n + this%gwf_fresh%moffset
+      do ipos = this%gwf_fresh%dis%con%ia(n), &
+        this%gwf_fresh%dis%con%ia(n + 1) - 1
+        ihc = this%gwf_fresh%npf%dis%con%ihc( &
+              this%gwf_fresh%npf%dis%con%jas(ipos))
+        if (ihc == C3D_VERTICAL) then
           idx = idx + 1
-        end do
+          cycle
+        end if
+        m = this%gwf_fresh%dis%con%ja(ipos)
+        csat = this%gwf_fresh%npf%condsat(this%gwf_fresh%npf%dis%con%jas(ipos))
+        q = csat * (this%gwf_fresh%x(m) - this%gwf_fresh%x(n))
+        if (this%gwf_fresh%x(m) > this%gwf_fresh%x(n)) then
+          ! m is upstream: hs(m) affects the conductance
+          termf = this%get_dsfdhs(m, 2) * q
+          call matrix_sln%add_value_pos(this%idxjasalt(idx), termf)
+          rhs_sln(iglo) = rhs_sln(iglo) + termf * this%gwf_salt%x(m)
+        else
+          ! n is upstream: hs(n) affects the conductance
+          termf = this%get_dsfdhs(n, 2) * q
+          call matrix_sln%add_value_pos(this%idxglo(n), termf)
+          rhs_sln(iglo) = rhs_sln(iglo) + termf * this%gwf_salt%x(n)
+        end if
+        idx = idx + 1
       end do
+    end do
 
-      ! SALTWATER EQUATIONS
-      ! go through each freshwater cell and evaluate effect of cross flow terms
-      ! in connected saltwater cells
-      idx = 1
-      do n = 1, this%gwf_salt%dis%nodes
-        iglo = n + this%gwf_salt%moffset
-        do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
-
-          ihc = this%gwf_salt%npf%dis%con%ihc(this%gwf_salt%npf%dis%con%jas(ipos))
-          if (ihc == C3D_VERTICAL) then
-            idx = idx + 1
-            cycle
-          end if
-
-          m = this%gwf_salt%dis%con%ja(ipos)
-          jglo = m + this%gwf_fresh%moffset
-
-          terms = DZERO
-          rterms = DZERO
-          hsn = this%gwf_salt%x(n)
-          hsm = this%gwf_salt%x(m)
-          csat = this%gwf_salt%npf%condsat(this%gwf_salt%npf%dis%con%jas(ipos))
-
-          if (hsm > hsn) then
-            ! Freshwater head in m affects n-m conductance so need to include derivative
-            ! term in saltwater equation
-            q = csat * (hsm - hsn)
-            dssdhf = this%get_dssdhf(m, 2)
-
-            ! amat contribution
-            terms = dssdhf * q
-            idxglopos = this%idxsymglo(n)
-
-            ! rhs contribution
-            hfm = this%gwf_fresh%x(m)
-            rterms = terms * hfm
-
-            call matrix_sln%add_value_pos(this%idxjafresh(idx), terms)
-            rhs_sln(iglo) = rhs_sln(iglo) + rterms
-
-          else
-
-            ! Saltwater head in n affects n-m conductance so need to include derivative
-            ! term in freshwater equation
-            q = csat * (hsm - hsn)
-            dssdhf = this%get_dssdhf(n, 2)
-
-            ! amat contribution
-            terms = dssdhf * q
-
-            ! rhs contribution
-            hfn = this%gwf_fresh%x(n)
-            rterms = terms * hfn
-
-            call matrix_sln%add_value_pos(this%idxsymglo(n), terms)
-            rhs_sln(iglo) = rhs_sln(iglo) + rterms
-
-          end if
-
-          ! increment counter for idx array
+    ! SALTWATER EQUATIONS: the freshwater head in a connected cell affects the
+    ! saltwater slab conductance, so it enters the saltwater equation.
+    idx = 1
+    do n = 1, this%gwf_salt%dis%nodes
+      iglo = n + this%gwf_salt%moffset
+      do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
+        ihc = this%gwf_salt%npf%dis%con%ihc(this%gwf_salt%npf%dis%con%jas(ipos))
+        if (ihc == C3D_VERTICAL) then
           idx = idx + 1
-        end do
+          cycle
+        end if
+        m = this%gwf_salt%dis%con%ja(ipos)
+        csat = this%gwf_salt%npf%condsat(this%gwf_salt%npf%dis%con%jas(ipos))
+        q = csat * (this%gwf_salt%x(m) - this%gwf_salt%x(n))
+        if (this%gwf_salt%x(m) > this%gwf_salt%x(n)) then
+          ! m is upstream: hf(m) affects the conductance
+          terms = this%get_dssdhf(m, 2) * q
+          call matrix_sln%add_value_pos(this%idxjafresh(idx), terms)
+          rhs_sln(iglo) = rhs_sln(iglo) + terms * this%gwf_fresh%x(m)
+        else
+          ! n is upstream: hf(n) affects the conductance
+          terms = this%get_dssdhf(n, 2) * q
+          call matrix_sln%add_value_pos(this%idxsymglo(n), terms)
+          rhs_sln(iglo) = rhs_sln(iglo) + terms * this%gwf_fresh%x(n)
+        end if
+        idx = idx + 1
       end do
-    end if
+    end do
 
-  end subroutine swi_swi_fn
+  end subroutine swi_fn_cross_flow
 
   subroutine swi_cross_storage(this, n, termf, rtermf, terms, rterms)
     ! modules
