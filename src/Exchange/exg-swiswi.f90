@@ -306,7 +306,7 @@ contains
     integer(I4B) :: n, iglo, jglo
     integer(I4B) :: ipos, m, idx
 
-    ! map same-cell fresh<->salt connections (must match swi_swi_ac gating)
+    ! map same-cell fresh<->salt connections (must match swi_swi_ac inclusion)
     if (this%inocrossstorage == 0 .or. this%inocrossflow == 0) then
       do n = 1, this%nexg
         iglo = n + this%gwf_fresh%moffset
@@ -316,7 +316,7 @@ contains
       end do
     end if
 
-    ! map cross-flow neighbor connections (must match swi_swi_ac gating)
+    ! map cross-flow neighbor connections (must match swi_swi_ac inclusion)
     if (this%inocrossflow == 0) then
       ! fresh node to salt nodes
       idx = 1

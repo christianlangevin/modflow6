@@ -287,7 +287,7 @@ contains
     ! register the SWI NPF flow formulation and flag ALL of its connections
     ! (horizontal and vertical) so NPF dispatches them to the SWI override; the
     ! formulation applies the fluid-slab conductance for horizontal connections
-    ! and the buoyancy-gated conductance for vertical connections
+    ! and the buoyancy-restricted conductance for vertical connections
     allocate (npf_form)
     npf_form%swi => this
     npf_form%npf => npf
@@ -392,7 +392,7 @@ contains
     ! Both horizontal and vertical fresh/saltwater flow are filled by the
     ! SwiNpfFormulationType flow formulation (swinpf_fc/fn/cq, dispatched from
     ! NPF for all flagged connections): the fluid-slab conductance for horizontal
-    ! connections and the buoyancy-gated conductance for vertical connections.
+    ! connections and the buoyancy-restricted conductance for vertical connections.
     !
     ! Storage is assembled by the SWI STO formulation (swisto_fc), dispatched
     ! from sto_fc for the flagged SWI_STORAGE cells -- no bolt-on correction here.
@@ -416,10 +416,11 @@ contains
     ! Flow Newton terms are filled by the SWI NPF formulation (swinpf_fn) and
     ! storage Newton terms by the SWI STO formulation (swisto_fn), both dispatched
     ! from the model. This routine is a no-op. Note swinpf_fn returns early for
-    ! vertical connections, so the buoyancy-gated vertical conductance is treated
-    ! Picard-style: a smoothed-tangent Newton term for it was implemented and
-    ! tested but gave no convergence benefit (interface storage, not the vertical
-    ! gate, is the bottleneck), so it was intentionally dropped (see swinpf_fn).
+    ! vertical connections, so the buoyancy-restricted vertical conductance is
+    ! treated Picard-style: a smoothed-tangent Newton term for it was implemented
+    ! and tested but gave no convergence benefit (interface storage, not the
+    ! vertical restriction, is the bottleneck), so it was intentionally dropped
+    ! (see swinpf_fn).
 
   end subroutine swi_fn
 
@@ -460,7 +461,7 @@ contains
     ! matrix fill in swinpf_fc; storage flows by the SWI STO formulation
     ! (swisto_cq). Both horizontal and vertical connections are handled: swinpf_cq
     ! shares swinpf_condf with swinpf_fc, which routes vertical connections to the
-    ! buoyancy-gated conductance (test_gwf_swi_vcol2 exercises an all-vertical
+    ! buoyancy-restricted conductance (test_gwf_swi_vcol2 exercises an all-vertical
     ! saltwater column and confirms the budget balances).
   end subroutine swi_cq
 
@@ -1007,24 +1008,24 @@ contains
   !! upper and a lower cell.
   !!
   !! Single-fluid (freshwater-only): the interface is a diagnostic derived from a
-  !! continuous freshwater potential, so the standard (ungated) vertical
+  !! continuous freshwater potential, so the standard (unrestricted) vertical
   !! conductance is returned. SWI still owns the connection -- so the treatment
-  !! can be changed later -- but does not adjust it. Gating the vertical flow here
-  !! would decouple the deep cells below the interface and leave the head field
-  !! underdetermined.
+  !! can be changed later -- but does not adjust it. Restricting the vertical flow
+  !! here would decouple the deep cells below the interface and leave the head
+  !! field underdetermined.
   !!
-  !! Two-fluid (buoyancy-gated): each fluid moves freely in its buoyant direction
-  !! -- freshwater up, saltwater down -- and is gated in the other by the fluid
-  !! present at the shared face: freshwater flows down only if the interface is
-  !! below the face (fresh at the face); saltwater flows up only if the interface
-  !! is above the face (salt at the face). Both switches -- the interface position
-  !! and the flow direction -- are smoothed with sSCurve and combined with a
-  !! smooth OR, so the conductance stays differentiable as the interface crosses
-  !! the face. The smoothing band is a fraction of the thickness of the cell whose
-  !! interface is being gated (the upper cell for freshwater, the lower cell for
-  !! saltwater), so it is meaningful when the two cells differ in thickness. The
-  !! blocked case is reduced to a residual (1e-6) conductance rather than zero, to
-  !! avoid a singular row.
+  !! Two-fluid (buoyancy-restricted): each fluid moves freely in its buoyant
+  !! direction -- freshwater up, saltwater down -- and is restricted in the other
+  !! by the fluid present at the shared face: freshwater flows down only if the
+  !! interface is below the face (fresh at the face); saltwater flows up only if
+  !! the interface is above the face (salt at the face). Both switches -- the
+  !! interface position and the flow direction -- are smoothed with sSCurve and
+  !! combined with a smooth OR, so the conductance stays differentiable as the
+  !! interface crosses the face. The smoothing band is a fraction of the thickness
+  !! of the cell whose interface is being tested (the upper cell for freshwater,
+  !! the lower cell for saltwater), so it is meaningful when the two cells differ
+  !! in thickness. The restricted case is reduced to a residual (1e-6)
+  !! conductance rather than zero, to avoid a singular row.
   !<
   function swinpf_vcondf(this, n, m, ipos, hnew) result(condf)
     class(SwiNpfFormulationType), intent(inout) :: this
@@ -1041,7 +1042,7 @@ contains
     npf => this%npf
     jas = npf%dis%con%jas(ipos)
     !
-    ! -- single-fluid: standard (ungated) vertical conductance
+    ! -- single-fluid: standard (unrestricted) vertical conductance
     if (this%swi%iconfiguration == FRESHWATER_ONE_FLUID) then
       ihc = npf%dis%con%ihc(jas)
       hyn = npf%hy_eff(n, m, ihc, ipos=ipos)
@@ -1068,12 +1069,12 @@ contains
     ! -- each fluid passes if it is present at the face OR flows in its buoyant
     !    direction (smooth "OR"): freshwater passes if fresh-at-face OR upflow;
     !    saltwater passes if salt-at-face OR downflow (= 1 - upflow). Smoothing
-    !    scales: the interface gate smooths over a fraction of the thickness of
-    !    the cell that holds the gated interface; the flow-direction gate smooths
-    !    over the equivalent head band (a zeta change of `band` is a head change
-    !    of band/alpha).  TODO: expose the 0.1 fraction as input.
+    !    scales: the interface switch smooths over a fraction of the thickness of
+    !    the cell that holds the tested interface; the flow-direction switch
+    !    smooths over the equivalent head band (a zeta change of `band` is a head
+    !    change of band/alpha).  TODO: expose the 0.1 fraction as input.
     if (this%swi%isaltwater == 0) then
-      ! freshwater: the gated interface zeta(iu) is in the UPPER cell
+      ! freshwater: the tested interface zeta(iu) is in the UPPER cell
       band = 1.0d-1 * (npf%dis%top(iu) - npf%dis%bot(iu))
       hband = band / this%swi%alphaf
       ! smoothed upflow indicator (1 for upflow, h_lower > h_upper; 0 for down)
@@ -1083,7 +1084,7 @@ contains
                    dydx, sface)
       factor = DONE - (DONE - sface) * (DONE - sup)
     else
-      ! saltwater: the gated interface zeta(il) is in the LOWER cell
+      ! saltwater: the tested interface zeta(il) is in the LOWER cell
       band = 1.0d-1 * (npf%dis%top(il) - npf%dis%bot(il))
       hband = band / this%swi%alphas
       ! smoothed upflow indicator (1 for upflow, h_lower > h_upper; 0 for down)
@@ -1221,14 +1222,14 @@ contains
     npf => this%npf
     jas = npf%dis%con%jas(ipos)
     ! Vertical connections use no Newton term (Picard only). A Newton term for
-    ! the two-fluid buoyancy-gated vertical conductance was implemented and
-    ! tested (the gate factor depends on both connected heads, via the smoothed
-    ! flow-direction switch and, through zeta, the interface-at-face switch). It
-    ! did not materially improve convergence -- outer-iteration counts were
-    ! within a few percent of Picard (and slightly higher) across interface
+    ! the two-fluid buoyancy-restricted vertical conductance was implemented and
+    ! tested (the restriction factor depends on both connected heads, via the
+    ! smoothed flow-direction switch and, through zeta, the interface-at-face
+    ! switch). It did not materially improve convergence -- outer-iteration counts
+    ! were within a few percent of Picard (and slightly higher) across interface
     ! speeds of 0.1-0.4 m/step, with and without under-relaxation -- because the
-    ! vertical gate is not the convergence bottleneck (interface storage is). It
-    ! was therefore not included. Single-fluid vertical flow is ungated.
+    ! vertical restriction is not the bottleneck (interface storage is). It
+    ! was therefore not included. Single-fluid vertical flow is unrestricted.
     if (npf%dis%con%ihc(jas) == C3D_VERTICAL) return
     idiag = npf%dis%con%ia(n)
     isymcon = npf%dis%con%isym(ipos)
@@ -1283,7 +1284,7 @@ contains
   !! flows are consistent with the matrix fill (and hence the CHD/GHB budgets,
   !! which are recovered from the flowja residual). Handles both horizontal and
   !! vertical connections: swinpf_condf routes vertical connections to the
-  !! buoyancy-gated conductance (swinpf_vcondf).
+  !! buoyancy-restricted conductance (swinpf_vcondf).
   !<
   subroutine swinpf_cq(this, n, m, ipos, flowja, h_new)
     class(SwiNpfFormulationType), intent(inout) :: this
