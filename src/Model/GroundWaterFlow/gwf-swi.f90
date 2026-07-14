@@ -666,7 +666,6 @@ contains
   !!
   !<
   function get_zetanew(this, n, eps_fresh, eps_salt) result(zetanew)
-    ! modules
     ! dummy
     class(GwfSwiType) :: this !< this instance
     integer(I4B) :: n !< cell number
@@ -677,77 +676,30 @@ contains
     ! locals
     real(DP) :: eps_f
     real(DP) :: eps_s
-    if (present(eps_fresh)) then
-      eps_f = eps_fresh
-    else
-      eps_f = DZERO
-    end if
-    if (present(eps_salt)) then
-      eps_s = eps_salt
-    else
-      eps_s = DZERO
-    end if
-    if (this%iconfiguration == FRESHWATER_TWO_FLUID .or. &
-        this%iconfiguration == SALTWATER_TWO_FLUID) then
-      ! two-model swi with fresh and salt
-      zetanew = calc_zeta(this%alphaf, &
-                          this%hfresh(n) + eps_f, &
-                          this%alphas, &
-                          this%hsalt(n) + eps_s)
-
-      ! cdl HACK -- keep minimum saltwater thickness
-      ! if (zetanew <= this%dis%bot(n)) then
-      !   zetanew = this%dis%bot(n) + 1.d-3 ! cdl DEM12
-      ! end if
-
-    else
-      ! freshwater only simulation
-      zetanew = calc_zeta(this%alphaf, this%hfresh(n) + eps_f, &
-                          this%alphas, this%hsalt(n))
-    end if
+    ! The head perturbations are used only by the two-fluid exchange when it forms
+    ! the numerical cross-derivatives; in single-fluid mode they are never passed
+    ! (eps_s stays zero and hsalt holds the prescribed saltwater head), so the
+    ! same expression serves both configurations. zeta is the unclamped
+    ! Ghyben-Herzberg map -- a vanished fluid zone is handled by the smoothed
+    ! saturation and the minimum-slab conductance floor, not by clamping zeta.
+    eps_f = DZERO
+    eps_s = DZERO
+    if (present(eps_fresh)) eps_f = eps_fresh
+    if (present(eps_salt)) eps_s = eps_salt
+    zetanew = calc_zeta(this%alphaf, this%hfresh(n) + eps_f, &
+                        this%alphas, this%hsalt(n) + eps_s)
   end function get_zetanew
 
-  !> @brief Get old value for zeta
-  !!
-  !! Include hsalt contribution if available and use perturbations if
-  !! provided, though may be able to eliminate perturbations as they
-  !! are probably not needed.
-  !!
+  !> @brief Get zeta from the previous time-step heads
   !<
-  function get_zetaold(this, n, eps_fresh, eps_salt) result(zetaold)
-    ! modules
+  function get_zetaold(this, n) result(zetaold)
     ! dummy
     class(GwfSwiType) :: this !< this instance
     integer(I4B) :: n !< cell number
-    real(DP), optional, intent(in) :: eps_fresh !< perturbation for fresh head
-    real(DP), optional, intent(in) :: eps_salt !< perturbation for salt head
     ! return
     real(DP) :: zetaold
-    ! locals
-    real(DP) :: eps_f
-    real(DP) :: eps_s
-    if (present(eps_fresh)) then
-      eps_f = eps_fresh
-    else
-      eps_f = DZERO
-    end if
-    if (present(eps_salt)) then
-      eps_s = eps_salt
-    else
-      eps_s = DZERO
-    end if
-    if (this%iconfiguration == FRESHWATER_TWO_FLUID .or. &
-        this%iconfiguration == SALTWATER_TWO_FLUID) then
-      ! two-model swi with fresh and salt
-      zetaold = calc_zeta(this%alphaf, &
-                          this%hfreshold(n) + eps_f, &
-                          this%alphas, &
-                          this%hsaltold(n) + eps_s)
-    else
-      ! freshwater only simulation
-      zetaold = calc_zeta(this%alphaf, this%hfreshold(n) + eps_f, &
-                          this%alphas, this%hsaltold(n))
-    end if
+    zetaold = calc_zeta(this%alphaf, this%hfreshold(n), &
+                        this%alphas, this%hsaltold(n))
   end function get_zetaold
 
   !> @brief Calculate zeta surface
