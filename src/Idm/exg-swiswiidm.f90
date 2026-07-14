@@ -14,6 +14,8 @@ module ExgSwiswiInputModule
   type ExgSwiswiParamFoundType
     logical :: ipr_input = .false.
     logical :: ipr_flow = .false.
+    logical :: inocrossstorage = .false.
+    logical :: inocrossflow = .false.
   end type ExgSwiswiParamFoundType
 
   logical :: exg_swiswi_multi_package = .true.
@@ -63,10 +65,50 @@ module ExgSwiswiInputModule
     )
 
   type(InputParamDefinitionType), parameter :: &
+    exgswiswi_inocrossstorage = InputParamDefinitionType &
+    ( &
+    'EXG', & ! component
+    'SWISWI', & ! subcomponent
+    'OPTIONS', & ! block
+    'DEV_NO_CROSS_STORAGE', & ! tag name
+    'INOCROSSSTORAGE', & ! fortran variable
+    'KEYWORD', & ! type
+    '', & ! shape
+    'disable cross-fluid storage newton terms', & ! longname
+    .false., & ! required
+    .false., & ! developmode
+    .false., & ! multi-record
+    .false., & ! preserve case
+    .false., & ! layered
+    .false. & ! timeseries
+    )
+
+  type(InputParamDefinitionType), parameter :: &
+    exgswiswi_inocrossflow = InputParamDefinitionType &
+    ( &
+    'EXG', & ! component
+    'SWISWI', & ! subcomponent
+    'OPTIONS', & ! block
+    'DEV_NO_CROSS_FLOW', & ! tag name
+    'INOCROSSFLOW', & ! fortran variable
+    'KEYWORD', & ! type
+    '', & ! shape
+    'disable cross-fluid flow newton terms', & ! longname
+    .false., & ! required
+    .false., & ! developmode
+    .false., & ! multi-record
+    .false., & ! preserve case
+    .false., & ! layered
+    .false. & ! timeseries
+    )
+
+  type(InputParamDefinitionType), parameter :: &
     exg_swiswi_param_definitions(*) = &
     [ &
     exgswiswi_ipr_input, &
-    exgswiswi_ipr_flow &
+    exgswiswi_ipr_flow, &
+    exgswiswi_inocrossstorage, &
+    exgswiswi_inocrossflow &
     ]
 
   type(InputParamDefinitionType), parameter :: &

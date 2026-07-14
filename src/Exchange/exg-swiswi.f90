@@ -42,6 +42,8 @@ module SwiSwiExchangeModule
     character(len=LINELENGTH), pointer :: filename => null() !< name of the input file
     integer(I4B), pointer :: ipr_input => null() !< flag to print input
     integer(I4B), pointer :: ipr_flow => null() !< print flag for cell by cell flows
+    integer(I4B), pointer :: inocrossstorage => null() !< dev flag: disable cross-fluid storage newton terms
+    integer(I4B), pointer :: inocrossflow => null() !< dev flag: disable cross-fluid flow newton terms
 
     ! number of connections
     integer(I4B), pointer :: nexg => null() !< number of connections (number of cells in fresh model or salt model)
@@ -253,34 +255,39 @@ contains
     integer(I4B) :: n, iglo, jglo
     integer(I4B) :: ipos, m
 
-    ! add nexg exchange connections; this adds locations for fresh node
-    ! to salt node connections
-    do n = 1, this%nexg
-      iglo = n + this%gwf_fresh%moffset
-      jglo = n + this%gwf_salt%moffset
-      call sparse%addconnection(iglo, jglo, 1)
-      call sparse%addconnection(jglo, iglo, 1)
-    end do
-
-    ! add cross flow connections from fresh node to salt nodes
-    do n = 1, this%gwf_fresh%dis%nodes
-      iglo = n + this%gwf_fresh%moffset
-      do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
-        m = this%gwf_salt%dis%con%ja(ipos)
-        jglo = m + this%gwf_salt%moffset
+    ! add same-cell fresh<->salt connections (used by cross-storage and by
+    ! cross-flow's self-upstream term); skip only if both are disabled
+    if (this%inocrossstorage == 0 .or. this%inocrossflow == 0) then
+      do n = 1, this%nexg
+        iglo = n + this%gwf_fresh%moffset
+        jglo = n + this%gwf_salt%moffset
         call sparse%addconnection(iglo, jglo, 1)
+        call sparse%addconnection(jglo, iglo, 1)
       end do
-    end do
+    end if
 
-    ! add cross flow connections from salt node to fresh nodes
-    do n = 1, this%gwf_salt%dis%nodes
-      iglo = n + this%gwf_salt%moffset
-      do ipos = this%gwf_fresh%dis%con%ia(n), this%gwf_fresh%dis%con%ia(n + 1) - 1
-        m = this%gwf_fresh%dis%con%ja(ipos)
-        jglo = m + this%gwf_fresh%moffset
-        call sparse%addconnection(iglo, jglo, 1)
+    ! add cross-flow neighbor connections (fresh<->salt) only if cross-flow is
+    ! active, so a disabled cross-flow does not expand the matrix sparsity
+    if (this%inocrossflow == 0) then
+      ! fresh node to salt nodes
+      do n = 1, this%gwf_fresh%dis%nodes
+        iglo = n + this%gwf_fresh%moffset
+        do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
+          m = this%gwf_salt%dis%con%ja(ipos)
+          jglo = m + this%gwf_salt%moffset
+          call sparse%addconnection(iglo, jglo, 1)
+        end do
       end do
-    end do
+      ! salt node to fresh nodes
+      do n = 1, this%gwf_salt%dis%nodes
+        iglo = n + this%gwf_salt%moffset
+        do ipos = this%gwf_fresh%dis%con%ia(n), this%gwf_fresh%dis%con%ia(n + 1) - 1
+          m = this%gwf_fresh%dis%con%ja(ipos)
+          jglo = m + this%gwf_fresh%moffset
+          call sparse%addconnection(iglo, jglo, 1)
+        end do
+      end do
+    end if
 
   end subroutine swi_swi_ac
 
@@ -298,37 +305,41 @@ contains
     integer(I4B) :: n, iglo, jglo
     integer(I4B) :: ipos, m, idx
 
-    ! map exchange connections
-    do n = 1, this%nexg
-      iglo = n + this%gwf_fresh%moffset
-      jglo = n + this%gwf_salt%moffset
-      this%idxglo(n) = matrix_sln%get_position(iglo, jglo)
-      this%idxsymglo(n) = matrix_sln%get_position(jglo, iglo)
-    end do
-
-    ! add cross flow connections from fresh node to salt nodes
-    idx = 1
-    do n = 1, this%gwf_fresh%dis%nodes
-      iglo = n + this%gwf_fresh%moffset
-      do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
-        m = this%gwf_salt%dis%con%ja(ipos)
-        jglo = m + this%gwf_salt%moffset
-        this%idxjasalt(idx) = matrix_sln%get_position(iglo, jglo)
-        idx = idx + 1
+    ! map same-cell fresh<->salt connections (must match swi_swi_ac gating)
+    if (this%inocrossstorage == 0 .or. this%inocrossflow == 0) then
+      do n = 1, this%nexg
+        iglo = n + this%gwf_fresh%moffset
+        jglo = n + this%gwf_salt%moffset
+        this%idxglo(n) = matrix_sln%get_position(iglo, jglo)
+        this%idxsymglo(n) = matrix_sln%get_position(jglo, iglo)
       end do
-    end do
+    end if
 
-    ! add cross flow connections from salt node to fresh nodes
-    idx = 1
-    do n = 1, this%gwf_salt%dis%nodes
-      iglo = n + this%gwf_salt%moffset
-      do ipos = this%gwf_fresh%dis%con%ia(n), this%gwf_fresh%dis%con%ia(n + 1) - 1
-        m = this%gwf_fresh%dis%con%ja(ipos)
-        jglo = m + this%gwf_fresh%moffset
-        this%idxjafresh(idx) = matrix_sln%get_position(iglo, jglo)
-        idx = idx + 1
+    ! map cross-flow neighbor connections (must match swi_swi_ac gating)
+    if (this%inocrossflow == 0) then
+      ! fresh node to salt nodes
+      idx = 1
+      do n = 1, this%gwf_fresh%dis%nodes
+        iglo = n + this%gwf_fresh%moffset
+        do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
+          m = this%gwf_salt%dis%con%ja(ipos)
+          jglo = m + this%gwf_salt%moffset
+          this%idxjasalt(idx) = matrix_sln%get_position(iglo, jglo)
+          idx = idx + 1
+        end do
       end do
-    end do
+      ! salt node to fresh nodes
+      idx = 1
+      do n = 1, this%gwf_salt%dis%nodes
+        iglo = n + this%gwf_salt%moffset
+        do ipos = this%gwf_fresh%dis%con%ia(n), this%gwf_fresh%dis%con%ia(n + 1) - 1
+          m = this%gwf_fresh%dis%con%ja(ipos)
+          jglo = m + this%gwf_fresh%moffset
+          this%idxjafresh(idx) = matrix_sln%get_position(iglo, jglo)
+          idx = idx + 1
+        end do
+      end do
+    end if
 
   end subroutine swi_swi_mc
 
@@ -417,17 +428,15 @@ contains
     integer(I4B), intent(in) :: kiter
     class(MatrixBaseType), pointer :: matrix_sln
     real(DP), dimension(:), intent(inout) :: rhs_sln
-    ! local
-    integer(I4B) :: icross_storage = 1
-    integer(I4B) :: icross_flow = 1
 
     ! -- cross-storage Jacobian is transient only; skip in a steady-state stress
     !    period. The cross-flow Jacobian below is not storage and applies always.
-    if (icross_storage == 1 .and. this%gwf_fresh%iss == 0) then
+    !    Either can be turned off with a dev option (inocrossstorage/inocrossflow).
+    if (this%inocrossstorage == 0 .and. this%gwf_fresh%iss == 0) then
       call this%swi_fn_cross_storage(matrix_sln, rhs_sln)
     end if
 
-    if (icross_flow == 1) then
+    if (this%inocrossflow == 0) then
       call this%swi_fn_cross_flow(matrix_sln, rhs_sln)
     end if
 
@@ -749,6 +758,10 @@ contains
                        found%ipr_input)
     call mem_set_value(this%ipr_flow, 'IPR_FLOW', this%input_mempath, &
                        found%ipr_flow)
+    call mem_set_value(this%inocrossstorage, 'INOCROSSSTORAGE', &
+                       this%input_mempath, found%inocrossstorage)
+    call mem_set_value(this%inocrossflow, 'INOCROSSFLOW', &
+                       this%input_mempath, found%inocrossflow)
     !
     write (iout, '(1x,a)') 'Processing SWI-SWI exchange options'
     !
@@ -760,6 +773,16 @@ contains
     if (found%ipr_flow) then
       write (iout, '(4x,a)') &
         'Exchange flows will be printed to list file.'
+    end if
+    !
+    if (found%inocrossstorage) then
+      write (iout, '(4x,a)') &
+        'Cross-fluid storage Newton terms are DISABLED (dev option).'
+    end if
+    !
+    if (found%inocrossflow) then
+      write (iout, '(4x,a)') &
+        'Cross-fluid flow Newton terms are DISABLED (dev option).'
     end if
     !
     write (iout, '(1x,a)') 'End processing SWI-SWI exchange options'
@@ -934,10 +957,14 @@ contains
 
     call mem_allocate(this%ipr_input, 'IPR_INPUT', this%memoryPath)
     call mem_allocate(this%ipr_flow, 'IPR_FLOW', this%memoryPath)
+    call mem_allocate(this%inocrossstorage, 'INOCROSSSTORAGE', this%memoryPath)
+    call mem_allocate(this%inocrossflow, 'INOCROSSFLOW', this%memoryPath)
     call mem_allocate(this%nexg, 'NEXG', this%memoryPath)
 
     this%ipr_input = 0
     this%ipr_flow = 0
+    this%inocrossstorage = 0
+    this%inocrossflow = 0
     this%nexg = 0
 
   end subroutine allocate_scalars
@@ -967,6 +994,8 @@ contains
     deallocate (this%filename)
     call mem_deallocate(this%ipr_input)
     call mem_deallocate(this%ipr_flow)
+    call mem_deallocate(this%inocrossstorage)
+    call mem_deallocate(this%inocrossflow)
     call mem_deallocate(this%nexg)
 
   end subroutine swi_swi_da
@@ -982,17 +1011,24 @@ contains
     class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
     ! local
     integer(I4B) :: i
-    integer(I4B) :: idxsize
+    integer(I4B) :: idxsize, nglo
 
-    call mem_allocate(this%idxglo, this%nexg, 'IDXGLO', this%memoryPath)
-    call mem_allocate(this%idxsymglo, this%nexg, 'IDXSYMGLO', this%memoryPath)
+    ! -- idxglo/idxsymglo (same-cell fresh<->salt) are used by cross-storage AND
+    !    by cross-flow's self-upstream term, so size them if either is active;
+    !    idxjasalt/idxjafresh (neighbor fresh<->salt) are cross-flow only. A
+    !    disabled term is sized 0 so it expands neither the matrix nor memory.
+    nglo = 0
+    if (this%inocrossstorage == 0 .or. this%inocrossflow == 0) nglo = this%nexg
+    idxsize = 0
+    if (this%inocrossflow == 0) idxsize = this%gwf_fresh%dis%con%nja
 
-    idxsize = this%gwf_fresh%dis%con%nja
+    call mem_allocate(this%idxglo, nglo, 'IDXGLO', this%memoryPath)
+    call mem_allocate(this%idxsymglo, nglo, 'IDXSYMGLO', this%memoryPath)
     call mem_allocate(this%idxjasalt, idxsize, 'IDXJASALT', this%memoryPath)
     call mem_allocate(this%idxjafresh, idxsize, 'IDXJAFRESH', this%memoryPath)
 
     ! Initialize
-    do i = 1, this%nexg
+    do i = 1, nglo
       this%idxglo(i) = 0
       this%idxsymglo(i) = 0
     end do
