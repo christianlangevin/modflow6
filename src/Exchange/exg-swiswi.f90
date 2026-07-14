@@ -605,11 +605,21 @@ contains
   end subroutine swi_cross_storage
 
   !> @ brief Calculate dSf/dhs for cross storage terms
+  !!
+  !! itype: 1 = forward difference, 2 = central difference, 3 = analytical.
+  !! Callers use the numerical central difference (2) rather than the analytical
+  !! form (3) on purpose. The analytical Jacobian (case 3) is exact and correct
+  !! (including at the top/bottom edges, see the comment there), but it is sharper
+  !! than the central difference, and the stiff two-fluid Newton overshoots with
+  !! it under bare solver settings (e.g. test_gwf_swi03 diverges with 3 but
+  !! converges once backtracking is on). The mildly-damped central difference is
+  !! more robust, so it is the default; switch callers to 3 if backtracking ever
+  !! becomes standard for the two-fluid case.
   function get_dsfdhs(this, n, itype) result(dsfdhs)
     ! dummy
     class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
     integer(I4B), intent(in) :: n !< node number
-    integer(I4B), intent(in) :: itype !< 1 for perturbation, 2 for analytical
+    integer(I4B), intent(in) :: itype !< 1 fwd diff, 2 central diff, 3 analytical
     real(DP) :: dsfdhs !< derivative of freshwater saturation with respect to saltwater head
     ! local
     real(DP) :: dereps !< perturbation for numerical derivative
@@ -644,7 +654,12 @@ contains
       ! sf = 1 - ss, sfp = 1 - ssp; sfp - sf = ss - ssp
       dsfdhs = (ss - ssp) / (2.D0 * dereps)
     case (3)
-      ! analytical derivative
+      ! analytical derivative. sQuadraticSaturationDerivative is the exact
+      ! derivative of sQuadraticSaturation (used in the residual), including at
+      ! the top/bottom edges where the smoothing tapers it to zero; passing the
+      ! same satomega keeps the two smoothing bands aligned. dzetadhs = alphas is
+      ! constant because get_zetanew does not clamp zeta to [bot, top] -- if that
+      ! clamp is ever re-enabled, this factor is wrong inside the clamped region.
       z = this%gwf_fresh%swi%get_zetanew(n)
       dssdzeta = sQuadraticSaturationDerivative(tp, bt, z, &
                                                 this%gwf_fresh%sto%satomega)
@@ -658,11 +673,15 @@ contains
   end function get_dsfdhs
 
   !> @ brief Calculate dSs/dhf for cross storage terms
+  !!
+  !! itype: 1 = forward difference, 2 = central difference, 3 = analytical.
+  !! See get_dsfdhs for why callers use the numerical central difference (2)
+  !! rather than the exact analytical form (3).
   function get_dssdhf(this, n, itype) result(dssdhf)
     ! dummy
     class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
     integer(I4B), intent(in) :: n !< node number
-    integer(I4B), intent(in) :: itype !< 1 for perturbation, 2 for analytical
+    integer(I4B), intent(in) :: itype !< 1 fwd diff, 2 central diff, 3 analytical
     real(DP) :: dssdhf !< derivative of saltwater saturation with respect to freshwater head
     ! local
     real(DP) :: dereps !< perturbation for numerical derivative
@@ -694,7 +713,12 @@ contains
       ssp = sQuadraticSaturation(tp, bt, zp, this%gwf_fresh%sto%satomega)
       dssdhf = (ssp - ss) / (2.D0 * dereps)
     case (3)
-      ! analytical derivative
+      ! analytical derivative. sQuadraticSaturationDerivative is the exact
+      ! derivative of sQuadraticSaturation (used in the residual), including at
+      ! the top/bottom edges where the smoothing tapers it to zero; passing the
+      ! same satomega keeps the two smoothing bands aligned. dzetadhf = -alphaf is
+      ! constant because get_zetanew does not clamp zeta to [bot, top] -- if that
+      ! clamp is ever re-enabled, this factor is wrong inside the clamped region.
       z = this%gwf_fresh%swi%get_zetanew(n)
       dssdzeta = sQuadraticSaturationDerivative(tp, bt, z, &
                                                 this%gwf_fresh%sto%satomega)
