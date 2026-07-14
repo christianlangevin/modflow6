@@ -1,4 +1,4 @@
-\begin{thebibliography}{36}
+\begin{thebibliography}{37}
 \providecommand{\natexlab}[1]{#1}
 \expandafter\ifx\csname urlstyle\endcsname\relax
   \providecommand{\doiagency}[1]{doi:\discretionary{}{}{}#1}\else
@@ -108,6 +108,13 @@ Hughes, J.D., Langevin, C.D., Paulinski, S.R., Larsen, J.D., and Brakenhoff,
   D., 2024, {FloPy} workflows for creating structured and unstructured
   {MODFLOW} models: Groundwater, v.~62, no.~1, p.~124--139,
   \url{https://doi.org/10.1111/gwat.13327}.
+
+\bibitem[{Huyakorn and others(1996)Huyakorn, Wu, and
+  Park}]{huyakorn1996multiphase}
+Huyakorn, P.S., Wu, Y.S., and Park, N.S., 1996, Multiphase approach to the
+  numerical solution of a sharp interface saltwater intrusion problem: Water
+  Resources Research, v.~32, no.~1, p.~93--102,
+  \url{https://doi.org/10.1029/95WR02919}.
 
 \bibitem[{Kavetski and Kuczera(2007)}]{doi:10.1029/2006WR005195}
 Kavetski, D., and Kuczera, G., 2007, Model smoothing strategies to remove
