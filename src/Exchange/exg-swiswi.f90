@@ -62,8 +62,8 @@ module SwiSwiExchangeModule
     procedure :: exg_ad => swi_swi_ad
     procedure :: exg_cf => swi_swi_cf
     procedure :: exg_fc => swi_swi_fc
+    procedure :: exg_fn => swi_swi_fn
     procedure :: swi_cross_storage
-    ! procedure :: exg_fn => swi_swi_fn
     ! ! procedure :: exg_cq => swi_swi_cq
     ! ! procedure :: exg_bd => swi_swi_bd
     ! procedure :: exg_ot => swi_swi_ot
@@ -377,17 +377,44 @@ contains
 
   !> @ brief Fill coefficients
   !!
-  !! Fill coefficient matrix with cross exchange terms
+  !! The SWI-SWI exchange contributes only Newton (Jacobian) cross terms; the
+  !! Picard cross-fluid coupling enters each model through the lagged interface
+  !! head in its own storage/flow fill. Dispatch the Newton terms to swi_swi_fn.
   !<
   subroutine swi_swi_fc(this, kiter, matrix_sln, rhs_sln, inwtflag)
-    ! modules
-    use GwfSwiModule, only: swi_thksat
     ! dummy
     class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
     integer(I4B), intent(in) :: kiter
     class(MatrixBaseType), pointer :: matrix_sln
     real(DP), dimension(:), intent(inout) :: rhs_sln
     integer(I4B), optional, intent(in) :: inwtflag
+    ! local
+    integer(I4B) :: inwt
+
+    ! -- set inwt to exchange newton, but shut off if requested by caller
+    inwt = this%gwf_fresh%inewton
+    if (present(inwtflag)) then
+      if (inwtflag == 0) inwt = 0
+    end if
+    if (inwt /= 0) then
+      call this%exg_fn(kiter, matrix_sln, rhs_sln)
+    end if
+  end subroutine swi_swi_fc
+
+  !> @ brief Fill Newton (Jacobian) cross terms for the SWI-SWI exchange
+  !!
+  !! Freshwater flow/storage depend on the saltwater head (and vice versa) through
+  !! the interface zeta = -alphaf*hf + alphas*hs. These are the derivative terms
+  !! coupling each fluid's equation to the other fluid's head; they cancel at
+  !! convergence (the Picard residual uses the lagged other-fluid head in the
+  !! model's own fc). Horizontal connections only; vertical flow is Picard.
+  !<
+  subroutine swi_swi_fn(this, kiter, matrix_sln, rhs_sln)
+    ! dummy
+    class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
+    integer(I4B), intent(in) :: kiter
+    class(MatrixBaseType), pointer :: matrix_sln
+    real(DP), dimension(:), intent(inout) :: rhs_sln
     ! local
     integer(I4B) :: n, iglo, jglo
     integer(I4B) :: ipos, m, idx
@@ -401,9 +428,7 @@ contains
     integer(I4B) :: icross_storage = 1
     integer(I4B) :: icross_flow = 1
 
-    ! -- TODO: these terms are Newton.  Should probably move to _fn
-
-    ! If steady steady, then skip out
+    ! If steady state, then skip out
     if (this%gwf_fresh%iss == 1) return
 
     ! -- Put cross storage terms into amatsln and rhs
@@ -563,19 +588,7 @@ contains
       end do
     end if
 
-    ! !
-    ! ! -- Set inwt to exchange newton, but shut off if requested by caller
-    ! inwt = this%inewton
-    ! if (present(inwtflag)) then
-    !   if (inwtflag == 0) inwt = 0
-    ! end if
-    ! if (inwt /= 0) then
-    !   call this%exg_fn(kiter, matrix_sln)
-    ! end if
-    !
-    ! -- Return
-    return
-  end subroutine swi_swi_fc
+  end subroutine swi_swi_fn
 
   subroutine swi_cross_storage(this, n, termf, rtermf, terms, rterms)
     ! modules
