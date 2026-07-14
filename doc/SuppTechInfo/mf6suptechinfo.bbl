@@ -1,9 +1,16 @@
-\begin{thebibliography}{32}
+\begin{thebibliography}{36}
 \providecommand{\natexlab}[1]{#1}
 \expandafter\ifx\csname urlstyle\endcsname\relax
   \providecommand{\doiagency}[1]{doi:\discretionary{}{}{}#1}\else
   \providecommand{\doiagency}{doi:\discretionary{}{}{}\begingroup
   \urlstyle{rm}\Url}\fi
+
+\bibitem[{Bakker and others(2013)Bakker, Schaars, Hughes, Langevin, and
+  Dausman}]{bakker2013documentation}
+Bakker, M., Schaars, F., Hughes, J.D., Langevin, C.D., and Dausman, A.M., 2013,
+  Documentation of the seawater intrusion (SWI2) package for MODFLOW: {U.S.
+  Geological Survey Techniques and Methods, book 6, chap. A46, 47 p.}, accessed
+  June 27, 2017, at \url{https://pubs.er.usgs.gov/publication/tm6A46}.
 
 \bibitem[{Bakker and others(2016)Bakker, Post, Langevin, Hughes, White, Starn,
   and Fienen}]{bakker2016flopy}
@@ -53,6 +60,13 @@ Guo, W., and Langevin, C.D., 2002, User's Guide to SEAWAT: A Computer Program
   Chapter A7, 77 p.}, accessed July 25, 2019, at
   \url{https://doi.org/https://doi.org/10.3133/twri06A7}, at
   \url{https://pubs.usgs.gov/publication/twri06A7}.
+
+\bibitem[{Halford and Hanson(2002)}]{halford2002}
+Halford, K.J., and Hanson, R.T., 2002, User guide for the drawdown-limited,
+  multi-node well (MNW) package for the U.S. Geological Survey's modular
+  three-dimensional finite-difference ground-water flow model, versions
+  MODFLOW-96 and MODFLOW-2000: {U.S. Geological Survey Open-File Report
+  02--293, 33 p.}
 
 \bibitem[{Harbaugh(2005)}]{modflow2005}
 Harbaugh, A.W., 2005, MODFLOW-2005, the U.S. Geological Survey modular
@@ -108,6 +122,13 @@ Kipp, K.L., 1987, HST3D: A Computer Code for Simulation of Heat and Solute
   Survey Water-Resources Investigation Report 86-4095, 517 p.}, accessed
   September 27, 2022, at \url{https://pubs.usgs.gov/wri/1986/4095/report.pdf}.
 
+\bibitem[{Konikow and others(2009)Konikow, Hornberger, Halford, and
+  Hanson}]{konikow2009}
+Konikow, L.F., Hornberger, G.Z., Halford, K.J., and Hanson, R.T., 2009, Revised
+  multi-node well (MNW2) package for MODFLOW ground-water flow model: {U.S.
+  Geological Survey Techniques and Methods, book 6, chap. A30, 67 p.}, accessed
+  June 27, 2017, at \url{https://pubs.usgs.gov/tm/tm6a30/}.
+
 \bibitem[{Langevin and others(2008)Langevin, Thorne~Jr, Dausman, Sukop, and
   Guo}]{langevin2008seawat}
 Langevin, C.D., Thorne~Jr, D.T., Dausman, A.M., Sukop, M.C., and Guo, W., 2008,
@@ -159,6 +180,12 @@ Panday, S., Langevin, C.D., Niswonger, R.G., Ibaraki, M., and Hughes, J.D.,
   volume finite-difference formulation: {U.S. Geological Survey Techniques and
   Methods, book 6, chap. A45, 66 p.}, accessed June 27, 2017, at
   \url{https://pubs.usgs.gov/tm/06/a45/}.
+
+\bibitem[{Peaceman(1983)}]{peaceman1983}
+Peaceman, D.W., 1983, Interpretation of well-block pressures in numerical
+  reservoir simulation with nonsquare grid blocks and anisotropic permeability:
+  Society of Petroleum Engineers Journal, v.~23, no.~03, p.~531--543, accessed
+  June 27, 2017, at \url{https://doi.org/10.2118/10528-PA}.
 
 \bibitem[{Pollock(2015)}]{pollock2015}
 Pollock, D.W., 2015, Extending the modpath algorithm to rectangular

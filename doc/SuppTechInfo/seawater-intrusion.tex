@@ -1,0 +1,302 @@
+% =============================================================================
+% Seawater Intrusion (SWI) Package -- SuppTechInfo chapter.
+%
+% Describes the SWI Package as implemented in gwf-swi.f90 / exg-swiswi.f90: a
+% sharp-interface flow extension that OVERRIDES the cell saturation used by the
+% NPF and STO Packages, symmetrically for the freshwater and (in two-fluid mode)
+% the saltwater models. The mathematics is written to match the code, and a
+% Limitations section documents the current incompatibilities with the rest of
+% MODFLOW 6.
+% =============================================================================
+
+The Seawater Intrusion (SWI) Package provides a computationally efficient, sharp-interface representation of the freshwater--saltwater interface in a coastal aquifer. Rather than resolving a diffuse mixing zone with a variable-density transport simulation, as in SEAWAT \citep{langevin2008seawat}, the SWI approach idealizes the transition between freshwater and saltwater as an abrupt interface and tracks its elevation. This is the same conceptual model used by the SWI2 Package for MODFLOW-2005 \citep{bakker2013documentation}; the \mf SWI Package reformulates that approach as a \emph{flow extension} that reuses the standard \mf flow and storage assembly. The sharp-interface idealization is appropriate when the width of the mixing zone is small relative to the aquifer thickness, and it can reduce the computational effort by one to two orders of magnitude relative to a full transport simulation, because no solute-transport equation is solved and the interface is represented by a single elevation per cell rather than by a resolved concentration field.
+
+The SWI Package supports two solution modes. In the \emph{single-fluid} mode, the saltwater is assumed to remain in hydrostatic equilibrium, only the freshwater flow equation is solved, and the interface elevation is a diagnostic quantity derived from the freshwater head. In the \emph{two-fluid} mode, separate freshwater and saltwater Groundwater Flow (GWF) models are solved simultaneously and coupled through a SWI--SWI exchange, so that the interface responds to the dynamics of both fluids. This chapter develops the override formulation that underlies both modes, describes the finite-volume and Newton--Raphson assembly as implemented, and closes with a summary of the current limitations of the package.
+
+\subsection{Governing Equations}
+
+Let $\zeta$ be the elevation of the sharp freshwater--saltwater interface, and let $Z_{T}$ and $Z_{B}$ be the top and bottom elevations of a cell. The freshwater and saltwater thicknesses within the cell are
+
+\begin{equation}
+\label{eqn:swi-thick}
+b^{f}=
+\begin{cases}
+Z_{T}-\zeta & h^{f}\ge Z_{T}\\
+h^{f}-\zeta & Z_{B}<h^{f}<Z_{T}\\
+0 & h^{f}\le Z_{B}
+\end{cases}
+\quad
+b^{s}=
+\begin{cases}
+Z_{T}-Z_{B} & \zeta\ge Z_{T}\\
+\zeta-Z_{B} & Z_{B}<\zeta<Z_{T}\\
+0 & \zeta\le Z_{B},
+\end{cases}
+\end{equation}
+
+\noindent where $h^{f}$ is the freshwater head. The interface elevation follows from the Ghyben--Herzberg relation, written with the dimensionless density ratios $\alpha_{f}$ and $\alpha_{s}$ used in the package,
+
+\begin{equation}
+\label{eqn:swi-gh}
+\zeta = -\alpha_{f}\,h^{f} + \alpha_{s}\,h^{s},
+\end{equation}
+
+\noindent with
+
+\begin{equation}
+\label{eqn:swi-alpha}
+\alpha_{f}=\frac{\rho_{f}}{\rho_{s}-\rho_{f}},
+\qquad
+\alpha_{s}=\frac{\rho_{s}}{\rho_{s}-\rho_{f}}=\alpha_{f}+1,
+\end{equation}
+
+\noindent where $h^{s}$ is the saltwater head and $\rho_{f}$ and $\rho_{s}$ are the freshwater and saltwater densities. For $\rho_{f}=1000$ and $\rho_{s}=1025$~\si{\kilogram\per\cubic\meter} the default values are $\alpha_{f}=40$ and $\alpha_{s}=41$. Equation~\ref{eqn:swi-gh} is the interface relation used throughout the implementation; the interface elevation is recomputed from the current heads wherever it is needed, so it is never a lagged quantity within an iteration.
+
+The vertically integrated volumetric balances for the two fluids, using the common assumption that specific yield equals the drainable porosity, are
+
+\begin{equation}
+\label{eqn:swi-pdef}
+b^{f}S_{s}\frac{\partial h^{f}}{\partial t}+S_{y}\frac{\partial b^{f}}{\partial t}
+=\nabla\!\cdot\!\big(\tilde K^{f}b^{f}\nabla h^{f}\big)+\dot W_{f},
+\end{equation}
+\begin{equation}
+\label{eqn:swi-pdes}
+b^{s}S_{s}\frac{\partial h^{s}}{\partial t}+S_{y}\frac{\partial b^{s}}{\partial t}
+=\nabla\!\cdot\!\big(\tilde K^{s}b^{s}\nabla h^{s}\big)+\dot W_{s},
+\end{equation}
+
+\noindent where $S_{s}$ is specific storage, $S_{y}$ is specific yield, $\tilde K^{f}$ and $\tilde K^{s}$ are the freshwater and saltwater hydraulic conductivities, and $\dot W_{f}$ and $\dot W_{s}$ are volumetric source and sink rates. The saltwater conductivity is obtained from the freshwater value through the density and viscosity ratios,
+
+\begin{equation}
+\label{eqn:swi-Ks}
+\tilde K^{s}=\tilde K^{f}\,\frac{\rho_{s}}{\mu_{s}}\frac{\mu_{f}}{\rho_{f}},
+\end{equation}
+
+\noindent where $\mu_{f}$ and $\mu_{s}$ are the freshwater and saltwater dynamic viscosities. Equations~\ref{eqn:swi-gh}, \ref{eqn:swi-pdef}, and \ref{eqn:swi-pdes} are three equations in the three unknowns $h^{f}$, $h^{s}$, and $\zeta$. In single-fluid mode only equation~\ref{eqn:swi-pdef} is solved and $\zeta$ follows from equation~\ref{eqn:swi-gh}; in two-fluid mode equations~\ref{eqn:swi-pdef} and \ref{eqn:swi-pdes} are solved simultaneously for $h^{f}$ and $h^{s}$.
+
+\subsection{The Override Formulation}
+\label{sec:swi-override}
+
+\subsubsection{Interface-based saturations}
+
+Define the total cell thickness $b^{\mathrm{T}}=Z_{T}-Z_{B}$ and the freshwater, saltwater, and total-water saturated fractions
+
+\begin{equation}
+\label{eqn:swi-sats}
+S^{f}=\frac{b^{f}}{b^{\mathrm{T}}},\qquad
+S^{s}=\frac{b^{s}}{b^{\mathrm{T}}},\qquad
+S^{w}=\frac{b^{f}+b^{s}}{b^{\mathrm{T}}}=S^{f}+S^{s}.
+\end{equation}
+
+\noindent Here $S^{w}$ is exactly the saturated cell fraction that standard \mf computes from the cell head, and $S^{f}$ and $S^{s}$ partition that water column at the interface $\zeta$. For confined conditions $S^{w}=1$, and for unconfined conditions $0\le S^{w}\le 1$.
+
+In the standard \mf formulation, the NPF Package builds each intercell flow term using the upstream water saturation $S^{w}$, and the STO Package builds each storage term using $S^{w}$ and its change. The SWI flow extension \emph{overrides} this saturation: in the freshwater model, NPF and STO use $S^{f}$ in place of $S^{w}$; in the saltwater model, NPF and STO use $S^{s}$ in place of $S^{w}$, together with the saltwater conductance of equation~\ref{eqn:swi-Ks}. Because the override is the same operation for both models, the formulation is symmetric between freshwater and saltwater, and there is no fluid-specific branching in the model assembly.
+
+The override is realized differently for the flow terms than for the storage terms, for a geometric reason. Horizontal conductance is linear in the slab thickness and independent of the slab elevation: a freshwater slab of thickness $b^{f}$ transmits $\tilde K^{f}b^{f}$ whether it sits at the cell bottom, middle, or top. The fluid saturation may therefore be handed to the conductance calculation directly, because $S^{f}C_{nm}=(S^{w}-S^{s})C_{nm}$ exactly, where $C_{nm}$ is the saturated conductance between cells $n$ and $m$. The storage kernels, by contrast, are nonlinear and anchored to the cell bottom $Z_{B}$, and cannot accept the fluid saturation $S^{f}$ directly; this is developed in the section on storage assembly (\ref{sec:swi-storage}).
+
+\subsubsection{Smoothed saturations and their derivatives}
+\label{sec:swi-smoothsat}
+
+The saturations are not evaluated as the sharp ratios of equation~\ref{eqn:swi-sats}. As in a standard \mf cell, they are smoothed near the cell top and bottom so that the saturation and its head derivative remain continuous as the water table or the interface crosses a cell boundary. The package uses the \mf quadratic smoothing function, denoted here by the operator $\mathcal{S}$,
+
+\begin{equation}
+\label{eqn:swi-smoothop}
+\mathcal{S}(x)\equiv \mathrm{sQuadraticSaturation}(Z_{T},Z_{B},x),
+\end{equation}
+
+\noindent which equals the linear fraction $(x-Z_{B})/b^{\mathrm{T}}$ over the cell interior but transitions quadratically to $0$ as $x$ approaches $Z_{B}$ and to $1$ as $x$ approaches $Z_{T}$, over a small fraction $\Omega$ of the cell thickness (the smoothing parameter). Both $\mathcal{S}$ and its derivative $\mathcal{S}'$ are continuous. The three saturations are evaluated with this single operator, each about the appropriate elevation,
+
+\begin{equation}
+\label{eqn:swi-smoothsat}
+S^{w}=\mathcal{S}(h^{f}),\qquad
+S^{s}=\mathcal{S}(\zeta),\qquad
+S^{f}=S^{w}-S^{s}.
+\end{equation}
+
+\noindent The total-water saturation is smoothed about the freshwater head exactly as in a standard \mf cell, the saltwater saturation is smoothed about the interface elevation, and the freshwater saturation is their difference. The derivatives of the interface elevation with respect to the two heads follow directly from equation~\ref{eqn:swi-gh},
+
+\begin{equation}
+\label{eqn:swi-dzeta}
+\frac{\partial\zeta}{\partial h^{f}}=-\alpha_{f},
+\qquad
+\frac{\partial\zeta}{\partial h^{s}}=\alpha_{s},
+\end{equation}
+
+\noindent and applying the chain rule to equation~\ref{eqn:swi-smoothsat} gives
+
+\begin{equation}
+\label{eqn:swi-dsat}
+\frac{\partial S^{w}}{\partial h^{f}}=\mathcal{S}'(h^{f}),\quad
+\frac{\partial S^{s}}{\partial h^{f}}=-\alpha_{f}\,\mathcal{S}'(\zeta),\quad
+\frac{\partial S^{s}}{\partial h^{s}}=\alpha_{s}\,\mathcal{S}'(\zeta).
+\end{equation}
+
+\noindent Over the cell interior $\mathcal{S}'\to 1/b^{\mathrm{T}}$, which recovers the sharp-interface slopes $b^{\mathrm{T}}\,\partial S^{s}/\partial h^{f}=-\alpha_{f}$ and $b^{\mathrm{T}}\,\partial S^{s}/\partial h^{s}=\alpha_{s}$; near a cell boundary the quadratic term rounds these toward zero, removing the derivative discontinuity that a linear thickness would produce. The freshwater saturation derivatives follow from equation~\ref{eqn:swi-smoothsat} as $\partial S^{f}/\partial h^{f}=\partial S^{w}/\partial h^{f}-\partial S^{s}/\partial h^{f}$ and $\partial S^{f}/\partial h^{s}=-\partial S^{s}/\partial h^{s}$, the latter because $S^{w}$ does not depend on $h^{s}$. Upstream weighting uses the saturation of the upstream cell, so each saturation derivative is nonzero only for the upstream cell.
+
+\subsection{Finite-Volume Flow Equations}
+
+\subsubsection{Freshwater and saltwater cell balances}
+
+With the override $S^{w}\to S^{f}$, the finite-volume freshwater flow equation is identical in form to the standard \mf cell equation,
+
+\begin{multline}
+\label{eqn:swi-fvf}
+A_{n}S^{f}S_{s}\,b^{\mathrm{T}}\frac{h_{n}^{f}-h_{n}^{f,t-1}}{\Delta t}
++A_{n}S_{y}\,b^{\mathrm{T}}\frac{S_{n}^{f}-S_{n}^{f,t-1}}{\Delta t}\\
+=\sum_{m}\big(S^{f}C_{nm}^{f}\big)\big(h_{m}^{f}-h_{n}^{f}\big)+\dot W_{f},
+\end{multline}
+
+\noindent where $A_{n}$ is the horizontal cell area, $C_{nm}^{f}$ is the saturated freshwater conductance between cells $n$ and $m$, $S^{f}$ is the upstream freshwater saturated fraction, the superscript $t-1$ denotes the previous time step, and $\Delta t$ is the time-step length. Identically, with $S^{w}\to S^{s}$ and the saltwater conductance,
+
+\begin{multline}
+\label{eqn:swi-fvs}
+A_{n}S^{s}S_{s}\,b^{\mathrm{T}}\frac{h_{n}^{s}-h_{n}^{s,t-1}}{\Delta t}
++A_{n}S_{y}\,b^{\mathrm{T}}\frac{S_{n}^{s}-S_{n}^{s,t-1}}{\Delta t}\\
+=\sum_{m}\big(S^{s}C_{nm}^{s}\big)\big(h_{m}^{s}-h_{n}^{s}\big)+\dot W_{s},
+\end{multline}
+
+\noindent with the saltwater saturated conductance obtained from the freshwater one through the density and viscosity ratios of equation~\ref{eqn:swi-Ks}, $C_{nm}^{s}=C_{nm}^{f}\,(\rho_{s}\mu_{f})/(\mu_{s}\rho_{f})$. Equations~\ref{eqn:swi-fvf} and \ref{eqn:swi-fvs} are symmetric: each is a standard \mf cell balance with the fluid-specific saturation and conductance.
+
+To guard against a singular or unphysical matrix row where a fluid zone has fully drained ($S^{f}\to 0$ or $S^{s}\to 0$), the fluid-slab conductance used in equations~\ref{eqn:swi-fvf} and \ref{eqn:swi-fvs} is floored at the conductance of a minimum-thickness slab, a small fraction of the saturated conductance. The floor is applied symmetrically to both models and does not perturb normally saturated cells; it prevents a vanished fluid zone from producing a zero or negative diagonal.
+
+\subsubsection{Vertical flow and the buoyancy gate}
+\label{sec:swi-vflow}
+
+The override of equations~\ref{eqn:swi-fvf} and \ref{eqn:swi-fvs} applies to horizontal connections, for which the fluid slab spans the full cell-to-cell interface. Vertical connections require separate treatment because the two fluids stack within the vertical column and a fluid can pass a shared face between an upper cell and a lower cell only if that fluid is present at the face.
+
+In single-fluid mode the interface is a diagnostic derived from a single continuous freshwater potential, so the standard, ungated vertical conductance is used. Gating vertical flow in this mode would decouple the deep cells below the interface and leave the head field underdetermined.
+
+In two-fluid mode the vertical conductance is buoyancy-gated. Each fluid moves freely in its buoyant direction---freshwater upward, saltwater downward---and is gated in the other direction by the fluid present at the shared face, whose elevation is $Z_{B}$ of the upper cell. Freshwater passes downward through the face only if the interface is below the face (freshwater at the face) or the flow is upward; saltwater passes upward only if the interface is above the face (saltwater at the face) or the flow is downward. Both switches---the interface position relative to the face and the flow direction---are smoothed and combined with a smooth logical ``or,'' so that the conductance stays differentiable as the interface crosses the face. The interface switch is smoothed over a fraction of the thickness of the cell that holds the gated interface (the upper cell for freshwater, the lower cell for saltwater), so it remains meaningful when the two connected cells differ in thickness. When a fluid is blocked, the conductance is reduced to a small residual value rather than to zero, again to avoid a singular row. No Newton term is applied to the vertical conductance; a smoothed-tangent Newton term for the buoyancy gate was implemented and tested but did not improve convergence, because the interface storage term, not the vertical gate, controls the nonlinear convergence rate.
+
+\subsubsection{Relationship to the standard MODFLOW 6 assembly}
+\label{sec:swi-split}
+
+Substituting $S^{f}=S^{w}-S^{s}$ into the flow term of equation~\ref{eqn:swi-fvf} shows how the override relates to what \mf would assemble for an ordinary single-fluid model,
+
+\begin{multline}
+\label{eqn:swi-split}
+\sum_{m}\big(S^{f}C_{nm}^{f}\big)\big(h_{m}^{f}-h_{n}^{f}\big)=
+\sum_{m}\big(S^{w}C_{nm}^{f}\big)\big(h_{m}^{f}-h_{n}^{f}\big)\\
+-\sum_{m}\big(S^{s}C_{nm}^{f}\big)\big(h_{m}^{f}-h_{n}^{f}\big).
+\end{multline}
+
+\noindent The $S^{w}$ term is what an ordinary \mf model assembles. For the flow term, the override supplies the combined $S^{f}$ saturation to NPF so this line is assembled once, with a single consistent upstream weighting; the split of equation~\ref{eqn:swi-split} is then only a derivation checkpoint. For the storage term, however, the two-column structure---the $S^{w}$ water column minus the $S^{s}$ salt column---is the actual organization of the code, for the geometric reason developed next. In both cases the saltwater contribution is owned by the SWI storage extension and assembled through the standard storage kernels, not added as a separate correction outside of them.
+
+\subsection{Newton--Raphson Formulation}
+
+The residual form of the freshwater equation~\ref{eqn:swi-fvf} is $F_{n}^{f}=Q_{n}^{f,\mathrm{sto}}-\sum_{m}Q_{nm}^{f}-\dot W_{f}=0$, and the Newton expansion with respect to both primary variables is
+
+\begin{multline}
+\label{eqn:swi-newtf}
+\Big(\tfrac{\partial F^{f}}{\partial h^{f}}\Big)^{\!k-1}\!h^{f,k}
++\Big(\tfrac{\partial F^{f}}{\partial h^{s}}\Big)^{\!k-1}\!h^{s,k}
+=-F^{f,k-1}\\
++\Big(\tfrac{\partial F^{f}}{\partial h^{f}}\Big)^{\!k-1}\!h^{f,k-1}
++\Big(\tfrac{\partial F^{f}}{\partial h^{s}}\Big)^{\!k-1}\!h^{s,k-1},
+\end{multline}
+
+\noindent where $k$ is the outer-iteration index. In single-fluid mode $h^{s}$ is fixed, so every $\partial/\partial h^{s}$ term vanishes and equation~\ref{eqn:swi-newtf} reduces to a Newton expansion in $h^{f}$ alone. In two-fluid mode the $\partial/\partial h^{s}$ terms are the cross-connection (off-diagonal) blocks supplied through the SWI--SWI exchange (\ref{sec:swi-cross}).
+
+\subsubsection{Flow term}
+
+Applying the Newton expansion to the freshwater flow term with the override saturation $S^{f}$, the coefficients added to the matrix for connection $n$--$m$ are
+
+\begin{align}
+\label{eqn:swi-fnflow}
+h_{n}^{f,k}:&\;\;
+-S^{f}C_{nm}^{f}+\frac{\partial S^{f}}{\partial h_{n}^{f}}C_{nm}^{f}\Delta h^{f},\\
+h_{m}^{f,k}:&\;\;
+\;\;\;S^{f}C_{nm}^{f}+\frac{\partial S^{f}}{\partial h_{m}^{f}}C_{nm}^{f}\Delta h^{f},\\
+h_{n}^{s,k}:&\;\;
+\frac{\partial S^{f}}{\partial h_{n}^{s}}C_{nm}^{f}\Delta h^{f},\\
+h_{m}^{s,k}:&\;\;
+\frac{\partial S^{f}}{\partial h_{m}^{s}}C_{nm}^{f}\Delta h^{f},
+\end{align}
+
+\noindent where $\Delta h^{f}=h_{m}^{f,k-1}-h_{n}^{f,k-1}$ and the matching products with $h^{k-1}$ are moved to the right-hand side as in equation~\ref{eqn:swi-newtf}. The first two lines are the diagonal-block terms that NPF assembles for the freshwater model once it is given $S^{f}$ and $\partial S^{f}/\partial h^{f}$; the last two are the off-diagonal cross terms filled at the exchange. The upstream saturation derivative that NPF uses is $\partial S^{f}/\partial h^{f}=\mathcal{S}'(h^{f})+\alpha_{f}\mathcal{S}'(\zeta)$, in which the interface term is amplified by $\alpha_{f}$; because it is multiplied by the small intercell head difference $\Delta h^{f}$, it remains a bounded correction to the conductance rather than a dominant diagonal term. The saltwater flow term is obtained by the symmetric replacement $f\leftrightarrow s$ and $C^{f}\to C^{s}$, giving the saltwater diagonal block in $h^{s}$ and its cross terms in $h^{f}$.
+
+\subsubsection{Storage term and the bottom-referencing constraint}
+\label{sec:swi-storage}
+
+The freshwater storage residual is mathematically correct when written in terms of $S^{f}$ and its head derivative, but it cannot be assembled by passing $S^{f}$ to the \mf storage kernels. The storage routines assume the smoothed saturation they are given is the saturation of a column that rises from the cell bottom: the compressible term places the fluid mid-elevation at $Z_{B}+\tfrac12 b^{\mathrm{T}}S$, and the drainable term references the water volume to $Z_{B}$. Both assumptions hold for $S^{w}=\mathcal{S}(h^{f})$, the saturation of the column $Z_{B}\to h^{f}$, and for $S^{s}=\mathcal{S}(\zeta)$, the saturation of the column $Z_{B}\to\zeta$, because each is measured from $Z_{B}$. They do not hold for $S^{f}=S^{w}-S^{s}$, whose lower bound is the moving interface $\zeta$ rather than $Z_{B}$.
+
+There is also a numerical reason not to assemble $S^{f}$ directly. The drainable-storage sensitivity of the freshwater column is
+
+\begin{equation}
+\label{eqn:swi-slabderiv}
+\frac{\partial\big(b^{\mathrm{T}}S^{f}\big)}{\partial h^{f}}
+=\frac{\partial\big(h^{f}-\zeta\big)}{\partial h^{f}}
+=1+\alpha_{f}\approx 41,
+\end{equation}
+
+\noindent so the interface term of $\partial S^{f}/\partial h^{f}=\mathcal{S}'(h^{f})+\alpha_{f}\mathcal{S}'(\zeta)$ is amplified by $\alpha_{f}\approx 40$. Placing this stiff, amplified derivative directly on the Newton diagonal corrupts the residual and produces false convergence in transient unconfined cases. The freshwater storage is therefore assembled as the difference of two bottom-referenced sub-assemblies, each built with the standard kernels,
+
+\begin{equation}
+\label{eqn:swi-twocol}
+Q_{n}^{f,\mathrm{sto}}\big(S^{f}\big)
+=\underbrace{Q_{n}^{\mathrm{sto}}\big(S^{w}\big)}_{\text{water column}}
+-\underbrace{Q_{n}^{\mathrm{sto}}\big(S^{s}\big)}_{\text{salt column}},
+\end{equation}
+
+\noindent which is exactly the storage part of the split of equation~\ref{eqn:swi-split}. The water-column assembly $Q_{n}^{\mathrm{sto}}(S^{w})$ is identical to what an ordinary \mf cell assembles (it is the STO default), and the salt-column assembly $Q_{n}^{\mathrm{sto}}(S^{s})$ applies the same kernels about $\zeta$. The freshwater fraction is never handed to a kernel; only $S^{w}$ and $S^{s}$ are.
+
+This two-column assembly is mapped onto the \mf Picard/Newton structure as follows. In the Picard (\texttt{fc}) contribution, the water column is assembled by the standard STO diagonal and right-hand side, which is residual-consistent on its own, and the salt-column drainable term is added as a chord-slope contribution that is stable under Picard; no $\alpha_{f}$-amplified tangent appears. In the Newton (\texttt{fn}) contribution, the smoothed interface tangent $\big(V_{n}S_{y}/\Delta t\big)\alpha_{f}\mathcal{S}'(\zeta)$, where $V_{n}=A_{n}b^{\mathrm{T}}$, is added to the diagonal with the matching product with $h^{f,k-1}$ on the right-hand side, so it cancels at convergence. The $\alpha_{f}$ amplification therefore appears only in the Newton contribution, where it sharpens the Jacobian without corrupting the residual. This split is what allows the storage override to converge where a single-diagonal $S^{f}$ assembly does not, and it makes explicit what the correction-based approach did implicitly. The saltwater storage terms follow by the symmetric replacement $f\leftrightarrow s$, with the salt column assembled about $\zeta$ using the $\alpha_{s}$ chain rule.
+
+\subsubsection{Cross-connection terms and the SWI--SWI exchange}
+\label{sec:swi-cross}
+
+In two-fluid mode the freshwater and saltwater models occupy the same grid, and each freshwater cell $n$ is connected to the coincident saltwater cell $n$ through a SWI--SWI exchange. The diagonal blocks above are assembled within each model by that model's NPF and STO through the override. The cross terms---$\partial F^{f}/\partial h^{s}$ for the freshwater equation and $\partial F^{s}/\partial h^{f}$ for the saltwater equation---are filled at the exchange connection. These are Newton (Jacobian) terms: each is added to the off-diagonal position and its product with the current head is added to the right-hand side, so the coupling cancels at convergence and does not bias the converged solution.
+
+The dominant cross terms are the drainable-storage terms. The freshwater-equation cross coefficient placed at the $n$(freshwater)--$n$(saltwater) connection is
+
+\begin{equation}
+\label{eqn:swi-crossf}
+\frac{V_{n}S_{y}}{\Delta t}\frac{\partial S_{n}^{f}}{\partial h_{n}^{s}}
+=-\frac{V_{n}S_{y}}{\Delta t}\frac{\partial S_{n}^{s}}{\partial h_{n}^{s}},
+\end{equation}
+
+\noindent and the saltwater-equation cross coefficient, with respect to $h^{f}$, is
+
+\begin{equation}
+\label{eqn:swi-crosss}
+\frac{V_{n}S_{y}}{\Delta t}\frac{\partial S_{n}^{s}}{\partial h_{n}^{f}}.
+\end{equation}
+
+\noindent The flow cross terms from the flow-term section are added at the same exchange location. The compressible-storage ($S_{s}$) cross term is small relative to the drainable-storage ($S_{y}$) cross term and is not carried in the current implementation; only the $S_{y}$ cross terms of equations~\ref{eqn:swi-crossf} and \ref{eqn:swi-crosss} are filled. Because the freshwater saturation vanishes when a cell fills with saltwater and the saltwater saturation vanishes when a cell fills with freshwater, each fluid is naturally prevented from leaving a cell it no longer occupies, so no separate interface-thickness limiter is required in the storage terms; the conductance floors described earlier serve only to keep the linear system nonsingular. The exchange also provides options to disable the cross-storage and cross-flow terms independently, which are used for development and testing; disabling the cross-flow terms also removes the corresponding off-diagonal positions from the matrix so the system is not enlarged unnecessarily.
+
+\subsection{Solution Considerations}
+
+The single-fluid mode solves a single freshwater flow equation and converges robustly with the standard iterative solver settings. The two-fluid mode couples two flow equations through the strongly nonlinear interface storage term, and the coupled system is stiff: an unconstrained Newton step can overshoot into a region where the matrix is poorly conditioned, which slows or prevents convergence. Enabling solver backtracking constrains the step and restores reliable convergence for the two-fluid mode; the more aggressive nonlinear solver settings are therefore recommended when running coupled two-fluid simulations. Because the interface elevation is recomputed from the current heads within each iteration rather than lagged, and the storage Newton tangent is isolated as described above, the converged solution is independent of these solver settings; they affect only the path to convergence.
+
+\subsection{Limitations}
+\label{sec:swi-limitations}
+
+The SWI Package overrides the saturation used by NPF and STO and, in two-fluid mode, adds a coupled second flow model. Several capabilities elsewhere in \mf assume the standard single-fluid cell formulation and are not compatible with the SWI override in its current form. These combinations are either untested or known to be inconsistent, and should be avoided; each is a candidate for an explicit input check that rejects the combination. The principal limitations are as follows.
+
+\begin{itemize}
+
+\item \textbf{Newton formulation required.} The interface saturations and their derivatives are formulated for the \mf Newton--Raphson solution. The Picard-only (standard) formulation is not supported: the interface-amplified storage tangent is assembled as a Newton contribution, and without it the nonlinear iteration is not expected to converge reliably.
+
+\item \textbf{Staggered horizontal connections.} The vertical buoyancy gate (\ref{sec:swi-vflow}) assumes that a vertical connection shares a single horizontal face at a well-defined elevation. Staggered or partially overlapping vertical connections, in which the shared face is not at a single elevation, are not handled by the interface-at-face gating.
+
+\item \textbf{Horizontal Flow Barrier (HFB) Package.} The HFB Package modifies the intercell conductance to represent a low-permeability barrier. The SWI override rescales the conductance by the fluid saturation independently, and the interaction of the two has not been formulated or tested.
+
+\item \textbf{XT3D and ghost-node correction (GNC).} The SWI override assumes the standard two-point, conductance-based intercell flux. The XT3D multi-point flux formulation and the ghost-node correction alter the flux stencil and are not applied to the SWI-overridden flow terms, so they are not compatible with SWI.
+
+\item \textbf{GWF--GWF coupling and local grid refinement (LGR).} The two-fluid mode uses a SWI--SWI exchange between coincident freshwater and saltwater grids. Coupling an SWI model to another GWF model through a GWF--GWF exchange, including nested-grid local grid refinement, is not supported.
+
+\item \textbf{Parallel simulation.} The SWI flow and storage extensions and the SWI--SWI exchange are not implemented for the parallel (distributed-memory) solution, and SWI simulations must be run in serial.
+
+\item \textbf{Solute and energy transport.} The SWI Package represents the freshwater--saltwater interface as a sharp interface with no resolved concentration or temperature field. Coupling an SWI flow model to the Groundwater Transport (GWT) or Groundwater Energy (GWE) models is not defined, and variable-density transport applications should use SEAWAT-style variable-density flow rather than SWI.
+
+\item \textbf{Particle tracking.} The Particle Tracking (PRT) model constructs pathlines from the GWF flow field. The two-fluid velocity field and the interface geometry produced by SWI are not exposed to PRT, so particle tracking through SWI simulations is not supported.
+
+\item \textbf{Buoyancy and viscosity packages.} The density and viscosity effects of the freshwater--saltwater contrast are already encoded in the SWI formulation through the density ratios $\alpha_{f}$ and $\alpha_{s}$ and the saltwater conductance scaling of equation~\ref{eqn:swi-Ks}. Combining SWI with the Buoyancy (BUY) or Viscosity (VSC) Packages would double-count these effects and is not supported.
+
+\item \textbf{Advanced stress packages.} The advanced stress packages (for example, Multi-Aquifer Well, Streamflow Routing, Lake, and Unsaturated Zone Flow) exchange water with the aquifer based on the standard cell head and saturation. Their interaction with the fluid-specific saturations and the two-fluid interface has not been formulated or tested, and they are not currently supported with SWI.
+
+\end{itemize}
+
+\subsection{Summary}
+
+The SWI Package is implemented as a flow extension that overrides the cell saturation used by the NPF and STO Packages, symmetrically for the freshwater model and, in two-fluid mode, the saltwater model. For flow, each extension supplies the fluid-specific saturation ($S^{f}$ or $S^{s}$) and, for saltwater, the conductance scaling of equation~\ref{eqn:swi-Ks}, in place of $S^{w}$; vertical connections in two-fluid mode use a buoyancy-gated conductance. For storage, each extension assembles the fluid storage as a difference of two bottom-referenced column assemblies through the standard STO kernels, because the fluid saturation is not referenced to the cell bottom, and it isolates the interface-amplified tangent in the Newton contribution. The interface elevation is recomputed each iteration from equation~\ref{eqn:swi-gh}, and the smoothed saturations and their derivatives follow from the \mf quadratic smoothing function. In two-fluid mode the cross-derivative terms coupling the two heads are filled at the SWI--SWI exchange. The package supports the sharp-interface idealization efficiently but is currently limited to the combinations described in the Limitations section.
