@@ -428,11 +428,10 @@ contains
     integer(I4B) :: icross_storage = 1
     integer(I4B) :: icross_flow = 1
 
-    ! If steady state, then skip out
-    if (this%gwf_fresh%iss == 1) return
-
-    ! -- Put cross storage terms into amatsln and rhs
-    if (icross_storage == 1) then
+    ! -- Put cross storage terms into amatsln and rhs. Storage is transient only,
+    !    so skip in a steady-state stress period. (The cross-flow terms below are
+    !    not storage and DO apply in steady state.)
+    if (icross_storage == 1 .and. this%gwf_fresh%iss == 0) then
     do n = 1, this%nexg
 
       iglo = n + this%gwf_fresh%moffset
