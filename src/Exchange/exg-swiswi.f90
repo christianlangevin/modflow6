@@ -8,8 +8,7 @@ module SwiSwiExchangeModule
 
   use KindModule, only: DP, I4B, LGP
   use ConstantsModule, only: DZERO, LINELENGTH, DONE, C3D_VERTICAL
-  use SimModule, only: count_errors, store_error, store_error_filename, &
-                       store_error_unit
+  use SimModule, only: store_error, store_error_filename
   use SimVariablesModule, only: errmsg, model_loc_idx
   use MemoryHelperModule, only: create_mem_path
   use BaseModelModule, only: BaseModelType, GetBaseModelFromList
@@ -68,19 +67,10 @@ module SwiSwiExchangeModule
     procedure :: swi_fn_cross_storage
     procedure :: swi_fn_cross_flow
     procedure :: swi_cross_storage
-    ! ! procedure :: exg_cq => swi_swi_cq
-    ! ! procedure :: exg_bd => swi_swi_bd
-    ! procedure :: exg_ot => swi_swi_ot
     procedure :: exg_da => swi_swi_da
-    ! procedure :: exg_fp => swi_swi_fp
-    ! procedure :: get_iasym => swi_swi_get_iasym
     procedure :: allocate_scalars
     procedure :: allocate_arrays
     procedure :: source_options
-    ! procedure :: source_dimensions
-    ! procedure :: source_data
-    ! procedure :: noder
-    ! procedure :: cellstr
     procedure :: get_dsfdhs
     procedure :: get_dssdhf
     procedure :: connects_model => swi_swi_connects_model
@@ -229,14 +219,8 @@ contains
     ! source options
     call this%source_options(iout)
 
-    ! ! -- source dimensions
-    ! call this%source_dimensions(iout)
-
     ! allocate arrays
     call this%allocate_arrays()
-
-    ! ! -- source exchange data
-    ! call this%source_data(iout)
 
     return
   end subroutine swi_swi_df
@@ -730,37 +714,6 @@ contains
 
   end function get_dssdhf
 
-  ! !> @ brief Fill Newton
-  ! !!
-  ! !! Fill amatsln with Newton terms
-  ! !<
-  ! subroutine swi_swi_fn(this, kiter, matrix_sln)
-  !   ! -- modules
-  !   use SmoothingModule, only: sQuadraticSaturationDerivative
-  !   ! -- dummy
-  !   class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
-  !   integer(I4B), intent(in) :: kiter
-  !   class(MatrixBaseType), pointer :: matrix_sln
-  !   ! -- local
-  !   !
-  !   ! -- Return
-  !   return
-  ! end subroutine swi_swi_fn
-
-  ! !> @ brief Output
-  ! !!
-  ! !! Write output
-  ! !<
-  ! subroutine swi_swi_ot(this)
-  !   ! -- modules
-  !   ! -- dummy
-  !   class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
-  !   ! -- local
-  !   !
-  !   ! -- Return
-  !   return
-  ! end subroutine swi_swi_ot
-
   !> @ brief Source options
   !!
   !! Source the options block
@@ -813,156 +766,6 @@ contains
     ! -- Return
     return
   end subroutine source_options
-
-  ! !> @ brief Source dimensions
-  ! !!
-  ! !! Source the dimensions block
-  ! !<
-  ! subroutine source_dimensions(this, iout)
-  !   ! -- modules
-  !   use ConstantsModule, only: LENVARNAME, DEM6
-  !   use InputOutputModule, only: getunit, openfile
-  !   use MemoryManagerExtModule, only: mem_set_value
-  !   use CharacterStringModule, only: CharacterStringType
-  !   use ExgSwiswiInputModule, only: ExgSwiswiParamFoundType
-  !   use SourceCommonModule, only: filein_fname
-  !   ! -- dummy
-  !   class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
-  !   integer(I4B), intent(in) :: iout
-  !   ! -- local
-  !   type(ExgSwiswiParamFoundType) :: found
-  !   !
-  !   ! -- update defaults with idm sourced values
-  !   call mem_set_value(this%nexg, 'NEXG', this%input_mempath, found%nexg)
-  !   !
-  !   write (iout, '(1x,a)') 'PROCESSING SWI-SWI EXCHANGE DIMENSIONS'
-  !   !
-  !   if (found%nexg) then
-  !     write (iout, '(4x,a,i0)') &
-  !       'Number of exchanges (NEXG) set to', this%nexg
-  !   else
-  !     write (errmsg, '(a)') 'Error in DIMENSIONS block: NEXG not found.'
-  !     call store_error(errmsg, terminate=.false.)
-  !     call store_error_filename(this%filename)
-  !   end if
-  !   !
-  !   write (iout, '(1x,a)') 'END OF SWI-SWI EXCHANGE DIMENSIONS'
-  !   !
-  !   ! -- Return
-  !   return
-  ! end subroutine source_dimensions
-
-  ! !> @brief Source exchange data from input context
-  ! !<
-  ! subroutine source_data(this, iout)
-  !   ! -- modules
-  !   use MemoryManagerModule, only: mem_setptr
-  !   ! -- dummy
-  !   class(SwiSwiExchangeType) :: this !< instance of exchange object
-  !   integer(I4B), intent(in) :: iout !< the output file unit
-  !   ! -- local
-  !   integer(I4B), dimension(:, :), contiguous, pointer :: cellidm1
-  !   integer(I4B), dimension(:, :), contiguous, pointer :: cellidm2
-  !   real(DP), dimension(:), contiguous, pointer :: amat_fresh
-  !   real(DP), dimension(:), contiguous, pointer :: rhs_fresh
-  !   real(DP), dimension(:), contiguous, pointer :: amat_salt
-  !   real(DP), dimension(:), contiguous, pointer :: rhs_salt
-  !   character(len=20) :: cellstr1, cellstr2
-  !   integer(I4B) :: nerr
-  !   integer(I4B) :: iexg, nodem1, nodem2
-  !   ! -- format
-  !   character(len=*), parameter :: fmtexglabel = "(1x, 3a10, 50(a16))"
-  !   character(len=*), parameter :: fmtexgdata = &
-  !                                  "(5x, a, 1x, a ,I10, 50(1pg16.6))"
-  !   !
-  !   call mem_setptr(cellidm1, 'CELLIDM1', this%input_mempath)
-  !   call mem_setptr(cellidm2, 'CELLIDM2', this%input_mempath)
-  !   call mem_setptr(amat_fresh, 'AMAT_FRESH', this%input_mempath)
-  !   call mem_setptr(rhs_fresh, 'RHS_FRESH', this%input_mempath)
-  !   call mem_setptr(amat_salt, 'AMAT_SALT', this%input_mempath)
-  !   call mem_setptr(rhs_salt, 'RHS_SALT', this%input_mempath)
-  !   !
-  !   write (iout, '(1x,a)') 'PROCESSING EXCHANGEDATA'
-  !   !
-  !   if (this%ipr_input /= 0) then
-  !     write (iout, fmtexglabel) 'NODEM1', 'NODEM2', 'AMAT_FRESH', &
-  !       'RHS_FRESH', 'AMAT_SALT', 'RHS_SALT'
-  !   end if
-  !   !
-  !   do iexg = 1, this%nexg
-  !     !
-  !     if (associated(this%gwf_fresh)) then
-  !       !
-  !       ! -- Determine user node number
-  !       nodem1 = this%noder(this%gwf_fresh, cellidm1(:, iexg), iout)
-  !       this%nodem1(iexg) = nodem1
-  !       !
-  !     else
-  !       this%nodem1(iexg) = -1
-  !     end if
-  !     !
-  !     if (associated(this%gwf_salt)) then
-  !       !
-  !       ! -- Determine user node number
-  !       nodem2 = this%noder(this%gwf_salt, cellidm2(:, iexg), iout)
-  !       this%nodem2(iexg) = nodem2
-  !       !
-  !     else
-  !       this%nodem2(iexg) = -1
-  !     end if
-  !     !
-  !     ! -- Read rest of input line
-  !     this%amat_fresh(iexg) = amat_fresh(iexg)
-  !     this%rhs_fresh(iexg) = rhs_fresh(iexg)
-  !     this%amat_salt(iexg) = amat_salt(iexg)
-  !     this%rhs_salt(iexg) = rhs_salt(iexg)
-  !     !
-  !     ! -- Write the data to listing file if requested
-  !     if (this%ipr_input /= 0) then
-  !       cellstr1 = this%cellstr(this%gwf_fresh, cellidm1(:, iexg), iout)
-  !       cellstr2 = this%cellstr(this%gwf_salt, cellidm2(:, iexg), iout)
-  !       write (iout, fmtexgdata) trim(cellstr1), trim(cellstr2), &
-  !         this%amat_fresh(iexg), this%rhs_fresh(iexg), &
-  !         this%amat_salt(iexg), this%rhs_salt(iexg)
-  !     end if
-  !     !
-  !     ! -- Check to see if nodem1 is outside of active domain
-  !     if (associated(this%gwf_fresh)) then
-  !       if (nodem1 <= 0) then
-  !         cellstr1 = this%cellstr(this%gwf_fresh, cellidm1(:, iexg), iout)
-  !         write (errmsg, *) &
-  !           trim(adjustl(this%gwf_fresh%name))// &
-  !           ' Cell is outside active grid domain ('// &
-  !           trim(adjustl(cellstr1))//').'
-  !         call store_error(errmsg)
-  !       end if
-  !     end if
-  !     !
-  !     ! -- Check to see if nodem2 is outside of active domain
-  !     if (associated(this%gwf_salt)) then
-  !       if (nodem2 <= 0) then
-  !         cellstr2 = this%cellstr(this%gwf_salt, cellidm2(:, iexg), iout)
-  !         write (errmsg, *) &
-  !           trim(adjustl(this%gwf_salt%name))// &
-  !           ' Cell is outside active grid domain ('// &
-  !           trim(adjustl(cellstr2))//').'
-  !         call store_error(errmsg)
-  !       end if
-  !     end if
-  !   end do
-  !   !
-  !   write (iout, '(1x,a)') 'END OF EXCHANGEDATA'
-  !   !
-  !   ! -- Stop if errors
-  !   nerr = count_errors()
-  !   if (nerr > 0) then
-  !     call store_error('Errors encountered in exchange input file.')
-  !     call store_error_filename(this%filename)
-  !   end if
-  !   !
-  !   ! -- Return
-  !   return
-  ! end subroutine source_data
 
   !> @ brief Allocate scalars
   !!
@@ -1063,143 +866,6 @@ contains
     ! -- Return
     return
   end subroutine allocate_arrays
-
-  ! !> @ brief Final processing
-  ! !!
-  ! !! Conduct any final processing
-  ! !<
-  ! subroutine swi_swi_fp(this)
-  !   ! -- dummy
-  !   class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
-  !   !
-  !   ! -- Return
-  !   return
-  ! end subroutine swi_swi_fp
-
-  ! !> @ brief Set symmetric flag
-  ! !!
-  ! !! Return flag indicating whether or not this exchange will cause the
-  ! !! coefficient matrix to be asymmetric.
-  ! !<
-  ! function swi_swi_get_iasym(this) result(iasym)
-  !   ! -- dummy
-  !   class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
-  !   ! -- local
-  !   integer(I4B) :: iasym
-  !   !
-  !   ! -- Newton formulation results in asymmetric matrix
-  !   iasym = 1
-  !   !
-  !   ! -- Return
-  !   return
-  ! end function swi_swi_get_iasym
-
-  ! !> @brief
-  ! !<
-  ! function noder(this, model, cellid, iout)
-  !   ! -- modules
-  !   use GeomUtilModule, only: get_node
-  !   ! -- dummy
-  !   class(SwiSwiExchangeType) :: this !< instance of exchange object
-  !   class(GwfModelType), pointer, intent(in) :: model
-  !   integer(I4B), dimension(:), pointer, intent(in) :: cellid
-  !   integer(I4B), intent(in) :: iout !< the output file unit
-  !   integer(I4B) :: noder, node
-  !   !
-  !   if (model%dis%ndim == 1) then
-  !     node = cellid(1)
-  !   elseif (model%dis%ndim == 2) then
-  !     node = get_node(cellid(1), 1, cellid(2), &
-  !                     model%dis%mshape(1), 1, &
-  !                     model%dis%mshape(2))
-  !   else
-  !     node = get_node(cellid(1), cellid(2), cellid(3), &
-  !                     model%dis%mshape(1), &
-  !                     model%dis%mshape(2), &
-  !                     model%dis%mshape(3))
-  !   end if
-  !   noder = model%dis%get_nodenumber(node, 0)
-  !   !
-  !   ! -- return
-  !   return
-  ! end function noder
-
-  ! !> @brief
-  ! !<
-  ! function cellstr(this, model, cellid, iout)
-  !   ! -- modules
-  !   ! -- dummy
-  !   class(SwiSwiExchangeType) :: this !< instance of exchange object
-  !   class(GwfModelType), pointer, intent(in) :: model
-  !   integer(I4B), dimension(:), pointer, intent(in) :: cellid
-  !   integer(I4B), intent(in) :: iout !< the output file unit
-  !   character(len=20) :: cellstr
-  !   character(len=*), parameter :: fmtndim1 = &
-  !                                  "('(',i0,')')"
-  !   character(len=*), parameter :: fmtndim2 = &
-  !                                  "('(',i0,',',i0,')')"
-  !   character(len=*), parameter :: fmtndim3 = &
-  !                                  "('(',i0,',',i0,',',i0,')')"
-  !   !
-  !   cellstr = ''
-  !   !
-  !   select case (model%dis%ndim)
-  !   case (1)
-  !     write (cellstr, fmtndim1) cellid(1)
-  !   case (2)
-  !     write (cellstr, fmtndim2) cellid(1), cellid(2)
-  !   case (3)
-  !     write (cellstr, fmtndim3) cellid(1), cellid(2), cellid(3)
-  !   case default
-  !   end select
-  !   !
-  !   ! -- return
-  !   return
-  ! end function cellstr
-
-  ! !> @ brief Cast polymorphic object as exchange
-  ! !!
-  ! !! Cast polymorphic object as exchange
-  ! !<
-  ! function CastAsSwiExchange(obj) result(res)
-  !   implicit none
-  !   ! -- dummy
-  !   class(*), pointer, intent(inout) :: obj
-  !   ! -- return
-  !   class(SwiSwiExchangeType), pointer :: res
-  !   !
-  !   res => null()
-  !   if (.not. associated(obj)) return
-  !   !
-  !   select type (obj)
-  !   class is (SwiSwiExchangeType)
-  !     res => obj
-  !   end select
-  !   !
-  !   ! -- Return
-  !   return
-  ! end function CastAsSwiExchange
-
-  ! !> @ brief Get exchange from list
-  ! !!
-  ! !! Return an exchange from the list for specified index
-  ! !<
-  ! function GetSwiExchangeFromList(list, idx) result(res)
-  !   implicit none
-  !   ! -- dummy
-  !   type(ListType), intent(inout) :: list
-  !   integer(I4B), intent(in) :: idx
-  !   ! -- return
-  !   class(SwiSwiExchangeType), pointer :: res
-  !   ! -- local
-  !   class(*), pointer :: obj
-  !   !
-  !   obj => list%GetItem(idx)
-  !   res => CastAsSwiExchange(obj)
-  !   !
-  !   ! -- Return
-  !   return
-  ! end function GetSwiExchangeFromList
 
   !> @brief Should return true when the exchange should be added to the
   !! solution where the model resides

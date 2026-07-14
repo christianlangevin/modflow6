@@ -773,8 +773,7 @@ contains
     if (this%incsub > 0) call this%csub%csub_cq(this%dis%nodes, this%x, &
                                                 this%xold, isuppress_output, &
                                                 this%flowja)
-    if (this%inswi > 0) call this%swi%swi_cq(this%x, this%xold, this%flowja, &
-                                             this%npf, this%sto)
+    if (this%inswi > 0) call this%swi%swi_cq()
     !
     ! -- Go through packages and call cq routines.  cf() routines are called
     !    first to regenerate non-linear terms to be consistent with the final

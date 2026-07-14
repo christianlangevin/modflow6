@@ -7,7 +7,6 @@ module GwfSwiModule
   use SimVariablesModule, only: errmsg
   use SimModule, only: store_error, store_error_filename
   use NumericalPackageModule, only: NumericalPackageType
-  use BlockParserModule, only: BlockParserType
   use BaseDisModule, only: DisBaseType
   use GwfNpfModule, only: GwfNpfType
   use GwfStoModule, only: GwfStoType
@@ -25,7 +24,6 @@ module GwfSwiModule
   private
   public :: GwfSwiType
   public :: swi_cr
-  public :: swi_thksat
 
   character(len=LENBUDTXT), dimension(1) :: budtxt = & !< text labels for budget terms
     &['         STORAGE']
@@ -88,7 +86,6 @@ module GwfSwiModule
     procedure, private :: log_options
     procedure :: allocate_scalars
     procedure, private :: allocate_arrays
-    procedure, private :: source_griddata
     procedure, private :: update_zeta
 
     procedure :: set_configuration
@@ -361,14 +358,9 @@ contains
   !> @ brief Calculate flows and storages for SWI package and adjust flowja
   !!
   !<
-  subroutine swi_cq(this, hnew, hold, flowja, npf, sto)
+  subroutine swi_cq(this)
     ! dummy variables
     class(GwfSwiType) :: this !< GwfSwiType object
-    real(DP), intent(in), dimension(:) :: hnew
-    real(DP), dimension(:), contiguous, intent(in) :: hold !< previous head
-    real(DP), dimension(:), contiguous, intent(inout) :: flowja !< connection flows
-    type(GwfNpfType), intent(in) :: npf
-    type(GwfStoType), intent(in) :: sto
     !
     ! Refresh the stored zeta array from the converged heads. zeta is not used by
     ! the solve (it is computed on the fly via get_zetanew wherever needed); the
@@ -482,7 +474,6 @@ contains
     class(GwfSwiType) :: this
 
     call this%source_options()
-    call this%source_griddata()
 
   end subroutine swi_load
 
@@ -625,20 +616,6 @@ contains
     write (this%iout, '(1x,a,/)') 'End Setting SWI Options'
 
   end subroutine log_options
-
-  !> @brief Copy grid data from IDM into package
-  !<
-  subroutine source_griddata(this)
-    ! modules
-    use MemoryManagerExtModule, only: mem_set_value
-    use GwfSwiInputModule, only: GwfSwiParamFoundType
-    ! dummy
-    class(GwfSwiType) :: this
-    ! local
-    ! type(GwfSwiParamFoundType) :: found
-    ! integer(I4B), dimension(:), pointer, contiguous :: map
-
-  end subroutine source_griddata
 
   !> @brief Set this model configuration.
   !! This can be called from an exchange, such as the
@@ -814,9 +791,8 @@ contains
 
   !> @brief Fractional cell freshwater saturation
   !<
-  subroutine swi_thksat(n, top, bot, zeta, thksat, inewton)
+  subroutine swi_thksat(top, bot, zeta, thksat, inewton)
     ! dummy
-    integer(I4B), intent(in) :: n
     real(DP), intent(in) :: top
     real(DP), intent(in) :: bot
     real(DP), intent(in) :: zeta
@@ -1004,8 +980,8 @@ contains
     !    with the storage terms and not lagged.
     ictn = 1
     ictm = 1
-    call swi_thksat(n, tn, bn, this%swi%get_zetanew(n), satn_s, npf%inewton)
-    call swi_thksat(m, tm, bm, this%swi%get_zetanew(m), satm_s, npf%inewton)
+    call swi_thksat(tn, bn, this%swi%get_zetanew(n), satn_s, npf%inewton)
+    call swi_thksat(tm, bm, this%swi%get_zetanew(m), satm_s, npf%inewton)
     condsw = hcond(npf%ibound(n), npf%ibound(m), ictn, ictm, npf%inewton, ihc, &
                    npf%icellavg, npf%condsat(jas), hnew(n), hnew(m), &
                    satn_s, satm_s, hyn, hym, tn, tm, bn, bm, &
@@ -1070,7 +1046,7 @@ contains
     ! local
     type(GwfNpfType), pointer :: npf
     integer(I4B) :: isymcon, idiag, idiagm, iups, idn, jas
-    real(DP) :: cond, consterm, filledterm, derv, term, topup, botup, zetaup
+    real(DP) :: cond, consterm, derv, term, topup, botup, zetaup
     !
     npf => this%npf
     jas = npf%dis%con%jas(ipos)
@@ -1284,7 +1260,7 @@ contains
     if (this%swi%ibound(n) < 1) return
     ! -- saltwater model: salt-column interface tangent (driven by h^s)
     if (this%swi%isaltwater == 1) then
-      call swisto_fn_salt(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
+      call swisto_fn_salt(this, n, matrix_sln, rhs, idxglo, h_new)
       return
     end if
     !
@@ -1464,7 +1440,7 @@ contains
   !! cell n. Upgrades the salt-column chord diagonal in swisto_fc_salt to the
   !! smoothed interface tangent (alphas chain rule). Newton only.
   !<
-  subroutine swisto_fn_salt(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
+  subroutine swisto_fn_salt(this, n, matrix_sln, rhs, idxglo, h_new)
     use TdisModule, only: delt
     use GwfStorageUtilsModule, only: SyCapacity
     class(SwiStoFormulationType), intent(inout) :: this
@@ -1472,7 +1448,6 @@ contains
     class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
     real(DP), dimension(:), intent(inout) :: rhs
     integer(I4B), dimension(:), intent(in) :: idxglo
-    real(DP), dimension(:), intent(in) :: h_old
     real(DP), dimension(:), intent(in) :: h_new
     ! local
     type(GwfStoType), pointer :: sto
