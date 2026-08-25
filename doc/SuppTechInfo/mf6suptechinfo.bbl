@@ -1,4 +1,4 @@
-\begin{thebibliography}{57}
+\begin{thebibliography}{59}
 \providecommand{\natexlab}[1]{#1}
 \expandafter\ifx\csname urlstyle\endcsname\relax
   \providecommand{\doiagency}[1]{doi:\discretionary{}{}{}#1}\else
@@ -26,6 +26,10 @@ Bakker, M., Post, V., Hughes, J.D., Langevin, C.D., White, J.T., Leaf, A.T.,
   Fienen, M.N., Starn, J.J., Brenhoff, D.A., and Bonelli, W.P., 2024, FloPy
   v3.7.0dev0 (preliminary): {U.S. Geological Survey Software Release},
   \url{https://doi.org/10.5066/F7BK19FH}.
+
+\bibitem[{Bear(1979)}]{bear1979}
+Bear, J., 1979, Hydraulics of groundwater: New York, New York, McGraw-Hill,
+  Inc, 569~p.
 
 \bibitem[{Bedekar and others(2016)Bedekar, Morway, Langevin, and
   Tonkin}]{mt3dusgs}
@@ -63,6 +67,12 @@ Darwish, M., and Moukalled, F., 2003, {TVD} schemes for unstructured grids:
   International Journal of Heat and Mass Transfer, v.~46, no.~4, p.~599--611,
   \url{https://doi.org/10.1016/S0017-9310(02)00330-7},
   \url{https://linkinghub.elsevier.com/retrieve/pii/S0017931002003307}.
+
+\bibitem[{Essaid(1990)}]{essaid1990}
+Essaid, H.I., 1990, The computer model {SHARP}, a quasi-three-dimensional
+  finite-difference model to simulate freshwater and saltwater flow in layered
+  coastal aquifer systems: {U.S. Geological Survey Water-Resources
+  Investigations Report 90--4130, 181 p.}
 
 \bibitem[{Fienen and others(2022)Fienen, Haserodt, Leaf, and
   Westenbroek}]{fienen2022centralsands}

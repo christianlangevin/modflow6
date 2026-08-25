@@ -1,0 +1,7 @@
+# Single-fluid mode with a sea level that changes by stress period.  The
+# TVA file island.swi.tva must provide a SALTWATER_HEAD auxiliary variable.
+
+BEGIN OPTIONS
+  ZETA FILEOUT island.zta
+  TVA6 FILEIN island.swi.tva
+END OPTIONS
