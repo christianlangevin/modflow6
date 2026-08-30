@@ -65,9 +65,7 @@ def build_models(idx, test):
 def check_output(idx, test):
     with open(test.workspace / "mfsim.lst", "r") as f:
         lines = f.readlines()
-    error_count = sum(
-        1 for line in lines if "specific yield (SY) be specified" in line
-    )
+    error_count = sum(1 for line in lines if "specific yield (SY) be specified" in line)
     assert error_count == 1, (
         "expected exactly one SWI 'SY required' error in mfsim.lst, "
         f"found {error_count}"
