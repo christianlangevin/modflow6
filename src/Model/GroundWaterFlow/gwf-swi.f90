@@ -103,6 +103,7 @@ module GwfSwiModule
     class(GwfSwiType), pointer :: swi => null() !< owning SWI package
     type(GwfNpfType), pointer :: npf => null() !< the model NPF package
   contains
+    procedure :: prepare => swinpf_prepare
     procedure :: is_active => swinpf_is_active
     procedure :: cf => swinpf_cf
     procedure :: fc => swinpf_fc
@@ -776,6 +777,56 @@ contains
     logical(LGP) :: is_active
     is_active = .true.
   end function swinpf_is_active
+
+  !> @brief SWI NPF formulation: per-iteration preparation.
+  !!
+  !! Refresh the NPF flow-reduction interval from the current heads. The
+  !! interval bounds the part of the cell occupied by the fluid this model
+  !! simulates: for a freshwater model the fresh zone is bounded BELOW by the
+  !! interface, so the interval bottom is max(cell bottom, zeta); for a
+  !! saltwater model the salt zone is bounded ABOVE by the interface, so the
+  !! interval top is min(cell top, zeta). Stress packages (WEL
+  !! AUTO_FLOW_REDUCE) read these arrays through NPF so their flow reduction
+  !! tapers as the fluid zone in the cell thins, without either package
+  !! referencing the other. zeta is treated as a lagged constant within the
+  !! iteration (Picard treatment of the zeta coupling), so the reduced rate is
+  !! exact at convergence.
+  !<
+  !! The interval bounds are under-relaxed across outer iterations (direct on
+  !! the first iteration, halved steps toward the current-head target after
+  !! that) to damp the well-interface coupling: when a well's reduction is
+  !! controlled by the lagged interval (e.g. a capped or saltwater well) the
+  !! coupling is pure Picard with no Newton term, and the undamped update can
+  !! oscillate. The relaxed bound converges to the current-head value as the
+  !! iterations converge, so the reduced rate is still exact at convergence.
+  subroutine swinpf_prepare(this, kiter)
+    class(SwiNpfFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: kiter
+    ! local
+    integer(I4B) :: n
+    real(DP) :: target_elev
+    if (this%swi%isaltwater == 0) then
+      do n = 1, this%npf%dis%nodes
+        target_elev = max(this%npf%dis%bot(n), this%swi%get_zetanew(n))
+        if (kiter == 1) then
+          this%npf%botreduce(n) = target_elev
+        else
+          this%npf%botreduce(n) = this%npf%botreduce(n) + &
+                                  DHALF * (target_elev - this%npf%botreduce(n))
+        end if
+      end do
+    else
+      do n = 1, this%npf%dis%nodes
+        target_elev = min(this%npf%dis%top(n), this%swi%get_zetanew(n))
+        if (kiter == 1) then
+          this%npf%topreduce(n) = target_elev
+        else
+          this%npf%topreduce(n) = this%npf%topreduce(n) + &
+                                  DHALF * (target_elev - this%npf%topreduce(n))
+        end if
+      end do
+    end if
+  end subroutine swinpf_prepare
 
   !> @brief SWI NPF formulation: per-cell precompute (zeta is updated elsewhere)
   !<
