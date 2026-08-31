@@ -65,14 +65,14 @@ b^{s}S_{s}\frac{\partial h^{s}}{\partial t}+S_{y}\frac{\partial b^{s}}{\partial 
 =\nabla\!\cdot\!\big(\tilde K^{s}b^{s}\nabla h^{s}\big)+\dot W_{s},
 \end{equation}
 
-\noindent where $S_{s}$ is specific storage, $S_{y}$ is specific yield, $\tilde K^{f}$ and $\tilde K^{s}$ are the freshwater and saltwater hydraulic conductivities, and $\dot W_{f}$ and $\dot W_{s}$ are volumetric source and sink rates. Saltwater hydraulic conductivity is calculated from the freshwater value using the density and viscosity ratios,
+\noindent where $S_{s}$ is specific storage, $S_{y}$ is specific yield, $\tilde K^{f}$ and $\tilde K^{s}$ are the freshwater and saltwater hydraulic conductivities, and $\dot W_{f}$ and $\dot W_{s}$ are volumetric source and sink rates. Saltwater hydraulic conductivity is related to the freshwater value through the density and viscosity ratios,
 
 \begin{equation}
 \label{eqn:swi-Ks}
 \tilde K^{s}=\tilde K^{f}\,\frac{\rho_{s}}{\mu_{s}}\frac{\mu_{f}}{\rho_{f}},
 \end{equation}
 
-\noindent where $\mu_{f}$ and $\mu_{s}$ are the freshwater and saltwater dynamic viscosities. Equations~\ref{eqn:swi-gh}, \ref{eqn:swi-pdef}, and \ref{eqn:swi-pdes} contain the three unknowns $h^{f}$, $h^{s}$, and $\zeta$. In single-fluid mode, only equation~\ref{eqn:swi-pdef} is solved and $\zeta$ is obtained from equation~\ref{eqn:swi-gh}. In two-fluid mode, equations~\ref{eqn:swi-pdef} and \ref{eqn:swi-pdes} are solved simultaneously for $h^{f}$ and $h^{s}$.
+\noindent where $\mu_{f}$ and $\mu_{s}$ are the freshwater and saltwater dynamic viscosities. The package does not apply this adjustment internally; the hydraulic conductivity entered for the saltwater model of a two-fluid simulation should be consistent with equation~\ref{eqn:swi-Ks}. For seawater the density and viscosity ratios nearly cancel, and the adjusted value differs from the freshwater value by only a few percent. Equations~\ref{eqn:swi-gh}, \ref{eqn:swi-pdef}, and \ref{eqn:swi-pdes} contain the three unknowns $h^{f}$, $h^{s}$, and $\zeta$. In single-fluid mode, only equation~\ref{eqn:swi-pdef} is solved and $\zeta$ is obtained from equation~\ref{eqn:swi-gh}. In two-fluid mode, equations~\ref{eqn:swi-pdef} and \ref{eqn:swi-pdes} are solved simultaneously for $h^{f}$ and $h^{s}$.
 
 \subsection{The SWI Formulation}
 \label{sec:swi-override}
@@ -162,7 +162,7 @@ A_{n}S_{n}^{s}S_{s}\,b^{\mathrm{T}}\frac{h_{n}^{s}-h_{n}^{s,t-1}}{\Delta t}
 =\sum_{m}\big(S_{nm}^{s,u}C_{nm}^{s}\big)\big(h_{m}^{s}-h_{n}^{s}\big)+\dot W_{s},
 \end{multline}
 
-\noindent where $S_{nm}^{s,u}$ is the upstream saltwater saturated cell fraction and saltwater conductance is obtained from freshwater conductance using equation~\ref{eqn:swi-Ks}, $C_{nm}^{s}=C_{nm}^{f}\,(\rho_{s}\mu_{f})/(\mu_{s}\rho_{f})$. Equations~\ref{eqn:swi-fvf} and \ref{eqn:swi-fvs} therefore have the same form, with the saturated cell fraction and conductance appropriate for each fluid.
+\noindent where $S_{nm}^{s,u}$ is the upstream saltwater saturated cell fraction and the saltwater conductance $C_{nm}^{s}$ is computed from the hydraulic conductivity specified for the saltwater model, which should reflect the density and viscosity adjustment of equation~\ref{eqn:swi-Ks} so that $C_{nm}^{s}=C_{nm}^{f}\,(\rho_{s}\mu_{f})/(\mu_{s}\rho_{f})$. Equations~\ref{eqn:swi-fvf} and \ref{eqn:swi-fvs} therefore have the same form, with the saturated cell fraction and conductance appropriate for each fluid.
 
 If a fluid zone becomes very thin, $S^{f}$ or $S^{s}$ can approach zero and produce a singular or poorly conditioned matrix row. To avoid this problem, the fluid-zone conductance is not allowed to decrease below the conductance corresponding to a small minimum zone thickness. The same floor is used for both fluids and has no effect when the fluid zone has appreciable thickness.
 
@@ -351,4 +351,4 @@ SWI replaces the default NPF and STO formulation and, in two-fluid mode, adds a 
 
 \subsection{Summary}
 
-The SWI Package provides a sharp-interface formulation for freshwater and saltwater flow in \mf. NPF flow terms use the saturated cell fraction of the simulated fluid, and saltwater conductance is adjusted for density and viscosity. In two-fluid mode, vertical flow is restricted to prevent movement against buoyancy through the opposing fluid. STO terms are assembled from bottom-referenced water and saltwater columns rather than directly from the freshwater saturated fraction, and interface-related tangent terms are included through the Newton formulation. The interface is recalculated from the current freshwater and saltwater heads during each iteration. In two-fluid simulations, cross-model derivatives are added through the SWI--SWI exchange. AUTO\_FLOW\_REDUCE is referenced to the thickness of the simulated fluid zone so that well withdrawal decreases as that zone becomes thin. Current package limitations are described in the preceding section.
+The SWI Package provides a sharp-interface formulation for freshwater and saltwater flow in \mf. NPF flow terms use the saturated cell fraction of the simulated fluid, and the hydraulic conductivity specified for the saltwater model should include the density and viscosity adjustment. In two-fluid mode, vertical flow is restricted to prevent movement against buoyancy through the opposing fluid. STO terms are assembled from bottom-referenced water and saltwater columns rather than directly from the freshwater saturated fraction, and interface-related tangent terms are included through the Newton formulation. The interface is recalculated from the current freshwater and saltwater heads during each iteration. In two-fluid simulations, cross-model derivatives are added through the SWI--SWI exchange. AUTO\_FLOW\_REDUCE is referenced to the thickness of the simulated fluid zone so that well withdrawal decreases as that zone becomes thin. Current package limitations are described in the preceding section.
