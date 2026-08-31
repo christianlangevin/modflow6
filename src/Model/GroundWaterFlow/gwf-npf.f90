@@ -89,6 +89,8 @@ module GwfNpfModule
     integer(I4B), pointer :: iwetdry => null() !< flag to indicate angle1 was read
     real(DP), dimension(:), pointer, contiguous :: wetdry => null() !< wetdry array
     real(DP), dimension(:), pointer, contiguous :: sat => null() !< saturation (0. to 1.) for each cell
+    real(DP), dimension(:), pointer, contiguous :: botreduce => null() !< bottom of the flow-reduction interval for each cell: the cell bottom, unless an active flow formulation raises it; read by stress packages for AUTO_FLOW_REDUCE
+    real(DP), dimension(:), pointer, contiguous :: topreduce => null() !< top of the flow-reduction interval for each cell: the cell top, unless an active flow formulation lowers it; read by stress packages for AUTO_FLOW_REDUCE
     real(DP), dimension(:), pointer, contiguous :: condsat => null() !< saturated conductance (symmetric array)
     integer(I4B), dimension(:), pointer, contiguous :: ibotnode => null() !< bottom node used if igwfnewtonur /= 0
     ! spdis machinery:
@@ -469,6 +471,14 @@ contains
     if (this%inewton /= 1) then
       call this%wd(kiter, hnew)
     end if
+
+    ! give each registered flow formulation a chance to refresh
+    ! iteration-level state (e.g. the flow-reduction interval); the
+    ! container is indexed by formulation id, so skip unregistered slots
+    do iform = 1, size(this%flow_formulations)
+      if (.not. associated(this%flow_formulations(iform)%form)) cycle
+      call this%flow_formulations(iform)%form%prepare(kiter)
+    end do
 
     do n = 1, this%dis%nodes
       ! get the active formulation for this node and call CF
@@ -1173,6 +1183,8 @@ contains
     call mem_deallocate(this%k22input)
     call mem_deallocate(this%k33input)
     call mem_deallocate(this%sat, 'SAT', this%memoryPath)
+    call mem_deallocate(this%botreduce)
+    call mem_deallocate(this%topreduce)
     call mem_deallocate(this%condsat)
     call mem_deallocate(this%wetdry)
     call mem_deallocate(this%angle1)
@@ -1347,6 +1359,8 @@ contains
     !
     ! -- Optional arrays
     call mem_allocate(this%ibotnode, 0, 'IBOTNODE', this%memoryPath)
+    call mem_allocate(this%botreduce, 0, 'BOTREDUCE', this%memoryPath)
+    call mem_allocate(this%topreduce, 0, 'TOPREDUCE', this%memoryPath)
     call mem_allocate(this%nodedge, 0, 'NODEDGE', this%memoryPath)
     call mem_allocate(this%ihcedge, 0, 'IHCEDGE', this%memoryPath)
     call mem_allocate(this%propsedge, 0, 0, 'PROPSEDGE', this%memoryPath)
@@ -3014,8 +3028,26 @@ contains
     class(GwfNpfType), intent(inout) :: this !< this NPF instance
     class(GwfNpfFormulationType), pointer :: npf_form !< the extended flow calculator
     integer(I4B) :: form_id !< the id for the flow formulation
+    ! local
+    integer(I4B) :: n
 
     this%flow_formulations(form_id)%form => npf_form
+
+    ! The flow-reduction interval is only carried at full size when a flow
+    ! formulation can narrow it; consumers (e.g. WEL AUTO_FLOW_REDUCE) fall
+    ! back to the cell bottom/top when the arrays are empty. Formulations
+    ! register during model AR, before the boundary packages resolve their
+    ! pointers.
+    if (size(this%botreduce) == 0) then
+      call mem_reallocate(this%botreduce, this%dis%nodes, 'BOTREDUCE', &
+                          this%memoryPath)
+      call mem_reallocate(this%topreduce, this%dis%nodes, 'TOPREDUCE', &
+                          this%memoryPath)
+      do n = 1, this%dis%nodes
+        this%botreduce(n) = this%dis%bot(n)
+        this%topreduce(n) = this%dis%top(n)
+      end do
+    end if
 
   end subroutine add_flow_formulation
 

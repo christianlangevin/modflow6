@@ -11,6 +11,7 @@ module GwfNpfFormulationModule
 
   type, abstract, public :: GwfNpfFormulationType
   contains
+    procedure :: prepare
     procedure(is_active_if), deferred :: is_active
     procedure(cf_if), deferred :: cf
     procedure(fc_if), deferred :: fc
@@ -70,5 +71,19 @@ module GwfNpfFormulationModule
       real(DP), dimension(:), intent(in) :: h_new
     end subroutine
   end interface
+
+contains
+
+  !> @brief Per-iteration preparation for the formulation (default: no-op).
+  !!
+  !! Called from npf_cf once per outer iteration for every registered
+  !! formulation, before the per-node cf dispatch. Extensions override this to
+  !! refresh iteration-level state computed from the current heads (e.g. the
+  !! NPF flow-reduction interval).
+  !<
+  subroutine prepare(this, kiter)
+    class(GwfNpfFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: kiter
+  end subroutine prepare
 
 end module GwfNpfFormulationModule
