@@ -103,7 +103,7 @@ module GwfSwiModule
     class(GwfSwiType), pointer :: swi => null() !< owning SWI package
     type(GwfNpfType), pointer :: npf => null() !< the model NPF package
   contains
-    procedure :: prepare => swinpf_prepare
+    procedure :: prepare_iteration => swinpf_prepare_iteration
     procedure :: is_active => swinpf_is_active
     procedure :: cf => swinpf_cf
     procedure :: fc => swinpf_fc
@@ -799,7 +799,7 @@ contains
   !! coupling is pure Picard with no Newton term, and the undamped update can
   !! oscillate. The relaxed bound converges to the current-head value as the
   !! iterations converge, so the reduced rate is still exact at convergence.
-  subroutine swinpf_prepare(this, kiter)
+  subroutine swinpf_prepare_iteration(this, kiter)
     class(SwiNpfFormulationType), intent(inout) :: this
     integer(I4B), intent(in) :: kiter
     ! local
@@ -826,7 +826,7 @@ contains
         end if
       end do
     end if
-  end subroutine swinpf_prepare
+  end subroutine swinpf_prepare_iteration
 
   !> @brief SWI NPF formulation: per-cell precompute (zeta is updated elsewhere)
   !<

@@ -477,7 +477,7 @@ contains
     ! container is indexed by formulation id, so skip unregistered slots
     do iform = 1, size(this%flow_formulations)
       if (.not. associated(this%flow_formulations(iform)%form)) cycle
-      call this%flow_formulations(iform)%form%prepare(kiter)
+      call this%flow_formulations(iform)%form%prepare_iteration(kiter)
     end do
 
     do n = 1, this%dis%nodes

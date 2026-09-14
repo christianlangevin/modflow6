@@ -11,7 +11,7 @@ module GwfNpfFormulationModule
 
   type, abstract, public :: GwfNpfFormulationType
   contains
-    procedure :: prepare
+    procedure :: prepare_iteration
     procedure(is_active_if), deferred :: is_active
     procedure(cf_if), deferred :: cf
     procedure(fc_if), deferred :: fc
@@ -81,9 +81,9 @@ contains
   !! refresh iteration-level state computed from the current heads (e.g. the
   !! NPF flow-reduction interval).
   !<
-  subroutine prepare(this, kiter)
+  subroutine prepare_iteration(this, kiter)
     class(GwfNpfFormulationType), intent(inout) :: this
     integer(I4B), intent(in) :: kiter
-  end subroutine prepare
+  end subroutine prepare_iteration
 
 end module GwfNpfFormulationModule
