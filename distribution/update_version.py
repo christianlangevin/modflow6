@@ -7,6 +7,7 @@ This script is used to update several files in the modflow6 repository, includin
 
   ../version.txt
   ../meson.build
+  ../utils/mf5to6/meson.build
   ../doc/version.tex
   ../README.md
   ../DISCLAIMER.md
@@ -39,7 +40,6 @@ import textwrap
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import pytest
 import yaml
@@ -55,6 +55,7 @@ version_file_path = project_root_path / "version.txt"
 touched_file_paths = [
     version_file_path,
     project_root_path / "meson.build",
+    project_root_path / "utils" / "mf5to6" / "meson.build",
     project_root_path / "doc" / "version.tex",
     project_root_path / "doc" / "version.py",
     project_root_path / "README.md",
@@ -128,8 +129,17 @@ def get_disclaimer(developmode: bool = False, formatted: bool = False) -> str:
     return _approved_fmtdisclaimer if formatted else _approved_disclaimer
 
 
+# Umbrella DOI for the "MODFLOW and Related Programs" software release page.
+# Used as the software citation DOI when a release-specific one isn't passed
+# via --doi.
+_default_doi = "https://doi.org/10.5066/F76Q1VQV"
+
+
 def get_software_citation(
-    timestamp: datetime, version: Version, developmode: bool = False
+    timestamp: datetime,
+    version: Version,
+    doi: str = _default_doi,
+    developmode: bool = False,
 ) -> str:
     # get data Software/Code citation for FloPy
     citation = yaml.safe_load((project_root_path / "CITATION.cff").read_text())
@@ -163,7 +173,7 @@ def get_software_citation(
         f", {timestamp.year}, "
         f"MODFLOW 6 Modular Hydrologic Model version {version}: "
         f"U.S. Geological Survey Software Release, {timestamp:%-d %B %Y}, "
-        "https://doi.org/10.5066/P9FL1JCC"
+        f"{doi}"
     )
 
     return line
@@ -190,14 +200,18 @@ def update_version_txt_and_py(version: Version, timestamp: datetime):
 
 
 def update_meson_build(version: Version):
-    path = project_root_path / "meson.build"
-    lines = open(path, "r").read().splitlines()
-    with open(path, "w") as f:
-        for line in lines:
-            if "version:" in line and "meson_version:" not in line:
-                line = f"  version: '{version}',"
-            f.write(f"{line}\n")
-    log_update(path, version)
+    paths = [
+        project_root_path / "meson.build",
+        project_root_path / "utils" / "mf5to6" / "meson.build",
+    ]
+    for path in paths:
+        lines = open(path, "r").read().splitlines()
+        with open(path, "w") as f:
+            for line in lines:
+                if "version:" in line and "meson_version:" not in line:
+                    line = f"  version: '{version}',"
+                f.write(f"{line}\n")
+        log_update(path, version)
 
 
 def update_version_tex(version: Version, timestamp: datetime, developmode: bool = True):
@@ -220,7 +234,7 @@ def update_version_tex(version: Version, timestamp: datetime, developmode: bool 
 
 
 def update_version_f90(
-    version: Optional[Version],
+    version: Version | None,
     timestamp: datetime,
     developmode: bool = False,
 ):
@@ -246,6 +260,10 @@ def update_version_f90(
             )
         elif ":: VERSIONNUMBER =" in line:
             line = line.rpartition("::")[0] + f":: VERSIONNUMBER = '{version_num}'"
+        elif ":: VERSIONVCSTAG =" in line and not developmode:
+            # release builds run before the release commit/tag exists,
+            # so set an empty tag here rather than rely on meson at build time
+            line = line.replace("@VCS_TAG@", "")
         elif ":: VERSIONTITLE =" in line:
             line = line.rpartition("::")[0] + f":: VERSIONTITLE = '{new_title}'"
         elif ":: FMTDISCLAIMER =" in line:
@@ -433,6 +451,7 @@ as well as several other files in the repository:
 
   ../version.txt
   ../meson.build
+  ../utils/mf5to6/meson.build
   ../doc/version.tex
   ../README.md
   ../DISCLAIMER.md
@@ -454,7 +473,10 @@ The version number is read from version.txt in the project root.
 Use `--releasemode` to control whether IDEVELOPMODE is set to 0 instead
 of 1, and to alter mf6's output and disclaimer text reflecting approval.
 
-Use `--citation` (`-c`) to render the current software citation.
+Use `--citation` (`-c`) to render the current software citation. Pass the
+release DOI link via `--doi` (`-d`), e.g.
+`--doi https://doi.org/10.5066/P1PGE9XW`; if omitted, the umbrella MODFLOW
+software DOI is used.
             """
         ),
     )
@@ -471,6 +493,15 @@ Use `--citation` (`-c`) to render the current software citation.
         required=False,
         action="store_true",
         help="Show the version, don't update anything. Defaults to false",
+    )
+    parser.add_argument(
+        "-d",
+        "--doi",
+        required=False,
+        default=_default_doi,
+        help="DOI link (e.g. https://doi.org/10.5066/P1PGE9XW) to substitute "
+        "into the software citation rendered by --citation. Defaults to the "
+        f"umbrella MODFLOW software DOI ({_default_doi}).",
     )
     parser.add_argument(
         "-a",
@@ -499,7 +530,10 @@ Use `--citation` (`-c`) to render the current software citation.
     elif citation:
         print(
             get_software_citation(
-                timestamp=datetime.now(), version=version, developmode=developmode
+                timestamp=datetime.now(),
+                version=version,
+                doi=args.doi,
+                developmode=developmode,
             )
         )
     else:
