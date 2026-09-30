@@ -9,6 +9,7 @@ module ExgSwiswiInputModule
   public exg_swiswi_block_definitions
   public ExgSwiswiParamFoundType
   public exg_swiswi_multi_package
+  public exg_swiswi_is_advanced
   public exg_swiswi_subpackages
 
   type ExgSwiswiParamFoundType
@@ -19,6 +20,7 @@ module ExgSwiswiInputModule
   end type ExgSwiswiParamFoundType
 
   logical :: exg_swiswi_multi_package = .true.
+  logical :: exg_swiswi_is_advanced = .false.
 
   character(len=16), parameter :: &
     exg_swiswi_subpackages(*) = &

@@ -179,6 +179,8 @@ contains
       is_advanced = exg_gwfprt_is_advanced
     case ('OLFGWF')
       is_advanced = exg_olfgwf_is_advanced
+    case ('SWISWI')
+      is_advanced = exg_swiswi_is_advanced
     case default
       call store_error('Idm selector subcomponent not found; '//&
                        &'component="EXG"'//&

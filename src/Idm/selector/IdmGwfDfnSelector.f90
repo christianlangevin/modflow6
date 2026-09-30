@@ -393,6 +393,8 @@ contains
       is_advanced = gwf_rivg_is_advanced
     case ('STO')
       is_advanced = gwf_sto_is_advanced
+    case ('SWI')
+      is_advanced = gwf_swi_is_advanced
     case ('VSC')
       is_advanced = gwf_vsc_is_advanced
     case ('WEL')
