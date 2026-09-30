@@ -14,3 +14,28 @@ solution = "SOLUTION"
 exchanges = "EXCHANGES"
 parallel = "PARALLEL"
 netcdf = "NETCDF"
+
+[[items]]
+section = "fixes"
+subsection = "model"
+description = "The DISU Package now checks the ANGLDEGX values specified for horizontal connections between active cells. A warning is issued if the values for a connection and its reverse connection do not differ by 180 degrees, or, when VERTICES and CELL2D are specified, if the face normal points away from the connected cell or differs by more than 1 degree from the normal computed from the vertices shared by the two cells. The NPF Package terminates with an error if any of these conditions is not met and ANGLDEGX is required input, that is, if XT3D, K22, or SAVE\\_SPECIFIC\\_DISCHARGE is specified. A separate warning flags normals that deviate by more than 45 degrees from the direction between the cell centers, which is not an error but may warrant a closer look at the grid. Inconsistent ANGLDEGX values previously went undetected and could produce an invalid coefficient matrix when the XT3D option or horizontal anisotropy was active, which in some cases caused the program to terminate with a floating-point overflow in the linear solver."
+
+[[items]]
+section = "fixes"
+subsection = "model"
+description = "The GWT and GWE Flow Model Interface (FMI) Packages did not recognize the GWFGRID entry in the PACKAGEDATA block and instead attempted to read the binary grid file as an advanced package budget file, causing an invalid method code error. The GWT and GWE FMI Packages now read the binary grid file, as the PRT FMI Package already did, and check that the flow and transport grids match."
+
+[[items]]
+section = "fixes"
+subsection = "basic"
+description = "Budget values with three-digit exponents were not always written to the list file with the E character (for example, 8.5159-100 instead of 8.5159E-100), which is valid Fortran but cannot be read by some post-processing tools. This occurred for absolute values between 1.0E-100 and 1.0E-99 and for values that round up to 1.0E+100. These values are now written with the E character."
+
+[[items]]
+section = "fixes"
+subsection = "advanced"
+description = "The Unsaturated Zone Flow (UZF) Package allocated and deallocated a complete set of unsaturated-zone work arrays on every evapotranspiration calculation, and a second, smaller set on every wave-routing calculation, once per UZF cell per outer iteration per time step. The work arrays are now allocated once when the package is set up, which reduces run times by 19 to 34 percent for the UZF test problems. Results are unchanged. The wave capacity NWAV and the number of trailing waves NTRAIL are now scalars rather than arrays with one value per UZF cell, so a program that reads them through the BMI or XMI interface must be updated."
+
+[[items]]
+section = "fixes"
+subsection = "advanced"
+description = "A Lake (LAK) Package using the IMPLICIT option reported roughly twice the outlet flow to the Water Mover (MVR) Package whenever any lake was solved by the substitution fallback. The mover provider term was accumulated once by the implicit formulation and again at the end of the fallback solve, so TO-MVR was about double the outlet discharge and the surplus appeared as a positive EXT-OUTFLOW, an apparent inflow that allowed the lake budget to close on the wrong flows. The mover term is now accumulated once, after the fallback stages are known. Models that do not use the IMPLICIT option, or that use it without a lake on the fallback, are unaffected."

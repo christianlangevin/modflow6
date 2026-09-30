@@ -31,14 +31,20 @@ and src/Utilities/version.f90. Otherwise, IDEVELOPMODE is set to 1.
 if --releasemode is provided, the disclaimer in src/Utilities/version.f90.in and the
 README/DISCLAIMER markdown files is modified to reflect review and approval.
 Otherwise the language reflects preliminary/provisional status.
+
+Timestamps use the current date, or --date if provided, so all steps of a release can
+agree on a date. Use ../doc/ReleaseNotes/release_history.py to add the release to the
+release history in the release notes. The date and DOI of a release in the release
+history are used in the software citation rendered with --citation.
 """
 
 import argparse
 import json
 import os
+import sys
 import textwrap
 from collections import OrderedDict
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import pytest
@@ -66,6 +72,9 @@ touched_file_paths = [
     project_root_path / "src" / "Utilities" / "version.f90",
 ]
 
+# the release history is managed by a script alongside the release notes
+sys.path.insert(0, str(project_root_path / "doc" / "ReleaseNotes"))
+from release_history import find_release  # noqa: E402
 
 _approved_fmtdisclaimer = '''  character(len=*), parameter :: FMTDISCLAIMER = &
     "(/,&
@@ -180,7 +189,7 @@ def get_software_citation(
 
 
 def log_update(path, version: Version):
-    print(f"Updated {path} with version {version}")
+    print(f"Updated {path} with version {version}", file=sys.stderr)
 
 
 def update_version_txt_and_py(version: Version, timestamp: datetime):
@@ -392,6 +401,17 @@ _initial_version = Version("0.0.1")
 _current_version = Version(version_file_path.read_text().strip())
 
 
+def release_version() -> Version:
+    """Current development version, any development segment (e.g. '.dev0') removed."""
+    return Version(_current_version.base_version)
+
+
+def post_release_version() -> Version:
+    """Development version for the next cycle: minor incremented, '.dev0' suffix."""
+    version = Version(_current_version.base_version)
+    return Version(f"{version.major}.{version.minor + 1}.0.dev0")
+
+
 @no_parallel
 @pytest.mark.skip(reason="reverts repo files on cleanup, treat carefully")
 @pytest.mark.parametrize(
@@ -464,19 +484,32 @@ text, text indicating whether the release is provisional or approved, source
 code setting the variable IDEVELOPMODE to either 0 or 1, and other data.
 
 Provide a `--version` string following semantic versioning conventions.
-If --version is not provided, the version number will not be changed,
-just timestamps.
+If none of --version, --release or --post-release is provided, the version
+number will not be changed, just timestamps.
 
-Use `--get` (`-g`) to show the current version without making changes.
-The version number is read from version.txt in the project root.
+Use `--release` (`-r`) to use the current development version with any
+development segment (e.g. '.dev0') removed. Use `--post-release` (`-p`) to
+use the next development version, with the minor version incremented and a
+'.dev0' suffix re-added; this is the version the post-release reset sets on
+the develop branch.
+
+Use `--get` (`-g`) or `--dry-run` to print the resolved version without
+making changes. The resolved version is printed on the last line in every
+mode, so `--post-release` alone both updates the files and reports the new
+version.
 
 Use `--releasemode` to control whether IDEVELOPMODE is set to 0 instead
 of 1, and to alter mf6's output and disclaimer text reflecting approval.
 
-Use `--citation` (`-c`) to render the current software citation. Pass the
-release DOI link via `--doi` (`-d`), e.g.
-`--doi https://doi.org/10.5066/P1PGE9XW`; if omitted, the umbrella MODFLOW
-software DOI is used.
+Use `--date` (`YYYY-MM-DD`) to give the date used in timestamps instead of
+the current date, so all steps of a release can use the same date.
+
+Use `--citation` (`-c`) to render the current software citation. The
+citation's date and DOI are those in the release history row for the version
+in ReleaseNotes.tex, see doc/ReleaseNotes/release_history.py. Without a row,
+the current date and the umbrella MODFLOW software DOI are used. Pass `--date`
+or the release DOI link via `--doi` (`-d`), e.g.
+`--doi https://doi.org/10.5066/P1PGE9XW`, to override them.
             """
         ),
     )
@@ -498,10 +531,20 @@ software DOI is used.
         "-d",
         "--doi",
         required=False,
-        default=_default_doi,
+        default=None,
         help="DOI link (e.g. https://doi.org/10.5066/P1PGE9XW) to substitute "
         "into the software citation rendered by --citation. Defaults to the "
-        f"umbrella MODFLOW software DOI ({_default_doi}).",
+        "DOI in the release history row for the version, or if there is none "
+        f"the umbrella MODFLOW software DOI ({_default_doi}).",
+    )
+    parser.add_argument(
+        "--date",
+        required=False,
+        type=date.fromisoformat,
+        default=None,
+        help="Date (YYYY-MM-DD) to use in timestamps, and in the citation "
+        "rendered by --citation. Defaults to the date in the release history "
+        "row for the version if rendering the citation, otherwise today.",
     )
     parser.add_argument(
         "-a",
@@ -518,27 +561,70 @@ software DOI is used.
         required=False,
         help="Specify the release version. Value must follow PEP 440.",
     )
+    parser.add_argument(
+        "-r",
+        "--release",
+        required=False,
+        action="store_true",
+        help="Use the current development version with any development segment "
+        "(e.g. '.dev0') removed. Defaults to false.",
+    )
+    parser.add_argument(
+        "-p",
+        "--post-release",
+        required=False,
+        action="store_true",
+        help="Use the next development version, with the minor version "
+        "incremented and a '.dev0' suffix re-added. Defaults to false.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        required=False,
+        action="store_true",
+        help="Print the resolved version and exit without updating anything. "
+        "Defaults to false.",
+    )
 
     args = parser.parse_args()
-    get = args.get
     citation = args.citation
     developmode = not args.releasemode
-    version = Version(args.version) if args.version else _current_version
 
-    if get:
-        print(Version((project_root_path / "version.txt").read_text().strip()))
-    elif citation:
+    if args.post_release:
+        version = post_release_version()
+    elif args.release:
+        version = release_version()
+    elif args.version:
+        version = Version(args.version)
+    else:
+        version = _current_version
+
+    now = datetime.now()
+    timestamp = datetime.combine(args.date, now.time()) if args.date else now
+
+    if citation:
+        # a release's date and DOI are those in its release history row
+        release = find_release(version.base_version)
+        if release is None:
+            print(
+                f"No release history row for {version}, using the current date "
+                "and umbrella DOI unless --date and --doi are provided",
+                file=sys.stderr,
+            )
+        elif not args.date:
+            timestamp = datetime.combine(release[0], now.time())
+        doi = args.doi or (release[1] if release else _default_doi)
         print(
             get_software_citation(
-                timestamp=datetime.now(),
+                timestamp=timestamp,
                 version=version,
-                doi=args.doi,
+                doi=doi,
                 developmode=developmode,
             )
         )
+    elif args.get or args.dry_run:
+        print(version)
     else:
         mode = "develop" if developmode else "release"
-        print(f"Updating to version {version} in {mode} mode")
-        update_version(
-            version=version, timestamp=datetime.now(), developmode=developmode
-        )
+        print(f"Updating to version {version} in {mode} mode", file=sys.stderr)
+        update_version(version=version, timestamp=timestamp, developmode=developmode)
+        print(version)

@@ -9,6 +9,7 @@ module GwfSwiInputModule
   public gwf_swi_block_definitions
   public GwfSwiParamFoundType
   public gwf_swi_multi_package
+  public gwf_swi_is_advanced
   public gwf_swi_subpackages
 
   type GwfSwiParamFoundType
@@ -24,6 +25,7 @@ module GwfSwiInputModule
   end type GwfSwiParamFoundType
 
   logical :: gwf_swi_multi_package = .false.
+  logical :: gwf_swi_is_advanced = .false.
 
   character(len=16), parameter :: &
     gwf_swi_subpackages(*) = &

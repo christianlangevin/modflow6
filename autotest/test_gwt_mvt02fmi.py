@@ -4,6 +4,8 @@ test movement of solute between stress and advanced packages.  In this case
 water from a drain is moved into the first sfr reach.  The test confirms
 that the solute from the drain is moved into the sfr reach.
 There is no flow between the stream and the aquifer.
+
+A second case also passes GWFGRID after the SFR budget entry.
 """
 
 import os
@@ -11,6 +13,7 @@ from os.path import join
 
 import flopy
 import numpy as np
+import pytest
 
 testgroup = "mvt02fmi"
 cases = ["mvt02fmi"]
@@ -226,7 +229,7 @@ def run_flow_model(dir, exe):
     assert success, errmsg
 
 
-def run_transport_model(dir, exe):
+def run_transport_model(dir, exe, gwfgrid=False):
     name = "transport"
     gwtname = name
     wst = join(dir, testgroup, name)
@@ -352,6 +355,8 @@ def run_transport_model(dir, exe):
         ("GWFMOVER", "../flow/flow.mvr.bud", None),
         ("SFR-1", "../flow/flow.sfr.bud", None),
     ]
+    if gwfgrid:
+        pd.append(("GWFGRID", "../flow/flow.dis.grb", None))
     fmi = flopy.mf6.ModflowGwtfmi(gwt, packagedata=pd)
 
     # output control
@@ -446,6 +451,7 @@ def run_transport_model(dir, exe):
     # assert False
 
 
-def test_mvt02fmi(function_tmpdir, targets):
+@pytest.mark.parametrize("gwfgrid", [False, True], ids=["nogrb", "grb"])
+def test_mvt02fmi(function_tmpdir, targets, gwfgrid):
     run_flow_model(str(function_tmpdir), targets["mf6"])
-    run_transport_model(str(function_tmpdir), targets["mf6"])
+    run_transport_model(str(function_tmpdir), targets["mf6"], gwfgrid=gwfgrid)
