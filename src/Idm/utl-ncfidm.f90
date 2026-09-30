@@ -9,6 +9,7 @@ module UtlNcfInputModule
   public utl_ncf_block_definitions
   public UtlNcfParamFoundType
   public utl_ncf_multi_package
+  public utl_ncf_is_advanced
   public utl_ncf_subpackages
 
   type UtlNcfParamFoundType
@@ -28,6 +29,7 @@ module UtlNcfInputModule
   end type UtlNcfParamFoundType
 
   logical :: utl_ncf_multi_package = .false.
+  logical :: utl_ncf_is_advanced = .false.
 
   character(len=16), parameter :: &
     utl_ncf_subpackages(*) = &

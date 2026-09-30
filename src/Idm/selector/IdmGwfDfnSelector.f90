@@ -22,6 +22,7 @@ module IdmGwfDfnSelectorModule
   use GwfGhbgInputModule
   use GwfHfbInputModule
   use GwfIcInputModule
+  use GwfMawInputModule
   use GwfNpfInputModule
   use GwfOcInputModule
   use GwfRchInputModule
@@ -40,6 +41,7 @@ module IdmGwfDfnSelectorModule
   public :: gwf_aggregate_definitions
   public :: gwf_block_definitions
   public :: gwf_idm_multi_package
+  public :: gwf_idm_is_advanced
   public :: gwf_idm_subpackages
   public :: gwf_idm_integrated
 
@@ -102,6 +104,8 @@ contains
       call set_param_pointer(input_definition, gwf_hfb_param_definitions)
     case ('IC')
       call set_param_pointer(input_definition, gwf_ic_param_definitions)
+    case ('MAW')
+      call set_param_pointer(input_definition, gwf_maw_param_definitions)
     case ('NPF')
       call set_param_pointer(input_definition, gwf_npf_param_definitions)
     case ('OC')
@@ -168,6 +172,8 @@ contains
       call set_param_pointer(input_definition, gwf_hfb_aggregate_definitions)
     case ('IC')
       call set_param_pointer(input_definition, gwf_ic_aggregate_definitions)
+    case ('MAW')
+      call set_param_pointer(input_definition, gwf_maw_aggregate_definitions)
     case ('NPF')
       call set_param_pointer(input_definition, gwf_npf_aggregate_definitions)
     case ('OC')
@@ -234,6 +240,8 @@ contains
       call set_block_pointer(input_definition, gwf_hfb_block_definitions)
     case ('IC')
       call set_block_pointer(input_definition, gwf_ic_block_definitions)
+    case ('MAW')
+      call set_block_pointer(input_definition, gwf_maw_block_definitions)
     case ('NPF')
       call set_block_pointer(input_definition, gwf_npf_block_definitions)
     case ('OC')
@@ -299,6 +307,8 @@ contains
       multi_package = gwf_hfb_multi_package
     case ('IC')
       multi_package = gwf_ic_multi_package
+    case ('MAW')
+      multi_package = gwf_maw_multi_package
     case ('NPF')
       multi_package = gwf_npf_multi_package
     case ('OC')
@@ -328,6 +338,74 @@ contains
     end select
     return
   end function gwf_idm_multi_package
+
+  function gwf_idm_is_advanced(subcomponent) result(is_advanced)
+    character(len=*), intent(in) :: subcomponent
+    logical :: is_advanced
+    select case (subcomponent)
+    case ('NAM')
+      is_advanced = gwf_nam_is_advanced
+    case ('API')
+      is_advanced = gwf_api_is_advanced
+    case ('BUY')
+      is_advanced = gwf_buy_is_advanced
+    case ('CHD')
+      is_advanced = gwf_chd_is_advanced
+    case ('CHDG')
+      is_advanced = gwf_chdg_is_advanced
+    case ('CSUB')
+      is_advanced = gwf_csub_is_advanced
+    case ('DIS')
+      is_advanced = gwf_dis_is_advanced
+    case ('DISU')
+      is_advanced = gwf_disu_is_advanced
+    case ('DISV')
+      is_advanced = gwf_disv_is_advanced
+    case ('DRN')
+      is_advanced = gwf_drn_is_advanced
+    case ('DRNG')
+      is_advanced = gwf_drng_is_advanced
+    case ('EVT')
+      is_advanced = gwf_evt_is_advanced
+    case ('EVTA')
+      is_advanced = gwf_evta_is_advanced
+    case ('GHB')
+      is_advanced = gwf_ghb_is_advanced
+    case ('GHBG')
+      is_advanced = gwf_ghbg_is_advanced
+    case ('HFB')
+      is_advanced = gwf_hfb_is_advanced
+    case ('IC')
+      is_advanced = gwf_ic_is_advanced
+    case ('MAW')
+      is_advanced = gwf_maw_is_advanced
+    case ('NPF')
+      is_advanced = gwf_npf_is_advanced
+    case ('OC')
+      is_advanced = gwf_oc_is_advanced
+    case ('RCH')
+      is_advanced = gwf_rch_is_advanced
+    case ('RCHA')
+      is_advanced = gwf_rcha_is_advanced
+    case ('RIV')
+      is_advanced = gwf_riv_is_advanced
+    case ('RIVG')
+      is_advanced = gwf_rivg_is_advanced
+    case ('STO')
+      is_advanced = gwf_sto_is_advanced
+    case ('VSC')
+      is_advanced = gwf_vsc_is_advanced
+    case ('WEL')
+      is_advanced = gwf_wel_is_advanced
+    case ('WELG')
+      is_advanced = gwf_welg_is_advanced
+    case default
+      call store_error('Idm selector subcomponent not found; '//&
+                       &'component="GWF"'//&
+                       &', subcomponent="'//trim(subcomponent)//'".', .true.)
+    end select
+    return
+  end function gwf_idm_is_advanced
 
   function gwf_idm_subpackages(subcomponent) result(subpackages)
     character(len=*), intent(in) :: subcomponent
@@ -367,6 +445,8 @@ contains
       call set_subpkg_pointer(subpackages, gwf_hfb_subpackages)
     case ('IC')
       call set_subpkg_pointer(subpackages, gwf_ic_subpackages)
+    case ('MAW')
+      call set_subpkg_pointer(subpackages, gwf_maw_subpackages)
     case ('NPF')
       call set_subpkg_pointer(subpackages, gwf_npf_subpackages)
     case ('OC')
@@ -432,6 +512,8 @@ contains
     case ('HFB')
       integrated = .true.
     case ('IC')
+      integrated = .true.
+    case ('MAW')
       integrated = .true.
     case ('NPF')
       integrated = .true.

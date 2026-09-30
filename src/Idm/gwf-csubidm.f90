@@ -9,6 +9,7 @@ module GwfCsubInputModule
   public gwf_csub_block_definitions
   public GwfCsubParamFoundType
   public gwf_csub_multi_package
+  public gwf_csub_is_advanced
   public gwf_csub_subpackages
 
   type GwfCsubParamFoundType
@@ -87,6 +88,7 @@ module GwfCsubInputModule
   end type GwfCsubParamFoundType
 
   logical :: gwf_csub_multi_package = .false.
+  logical :: gwf_csub_is_advanced = .false.
 
   character(len=16), parameter :: &
     gwf_csub_subpackages(*) = &

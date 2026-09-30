@@ -108,11 +108,14 @@ benchmark = { cmd = "python benchmark.py", cwd = "distribution" }
 build-docs = { cmd = "python build_docs.py", cwd = "distribution" }
 build-dist = { cmd = "python build_dist.py", cwd = "distribution" }
 check-dist = { cmd = "pytest -v -s check_dist.py", cwd = "distribution" }
-test-dist-scripts = { cmd = "pytest -v --durations 0", cwd = "distribution" }
+test-dist-scripts = { cmd = "pytest -v --durations 0", cwd = "distribution", depends-on = ["test-release-history"] }
 update-version = { cmd = "python update_version.py", cwd = "distribution" }
 collect-deprecations = { cmd = "python deprecations.py", cwd = "doc/mf6io/mf6ivar" }
 check-citations = "cffconvert --validate -i CITATION.cff"
 make-release-notes = { cmd = "python mk_releasenotes.py", cwd = "doc/ReleaseNotes" }
+reset-release-notes = { cmd = "python reset_releasenotes.py", cwd = "doc/ReleaseNotes" }
+add-release-history = { cmd = "python release_history.py", cwd = "doc/ReleaseNotes" }
+test-release-history = { cmd = "pytest -v test_release_history.py", cwd = "doc/ReleaseNotes" }
 
 # os-specific default tasks
 [target.linux-64.tasks]
@@ -166,7 +169,6 @@ platforms = ["linux-64", "osx-arm64"]
 git = "*"
 meson = "*"
 ninja = "*"
-gcc = "*"
 gfortran = "*"
 pkg-config = "*"
 libnetcdf = "*"
@@ -176,25 +178,16 @@ petsc = "<3.23.0"
 flopy = "*"  # so the get-exes task can run in this environment
 
 [feature.gcc-extended-build.target.linux-64.dependencies]
-gcc = "13.*"
+gfortran = "13.*"
+
+[feature.gcc-extended-build.target.osx-arm64.dependencies]
+# conda-forge builds test-drive with gfortran 14, so its gfortran 15 finalization
+# guard is not compiled in and the unit tests crash with gfortran 15
 gfortran = "13.*"
 
 [feature.gcc-extended-build.tasks]
 gcc-extended-build-update-pc-files = { cmd = "echo updating netcdf pc files && python gcc-extended-build-update-pc-files.py", cwd = "distribution" }
-gcc-extended-build-test-drive-clone = { cmd = "rm -rf .test-drive/ && git clone https://github.com/fortran-lang/test-drive.git .test-drive" }
-gcc-extended-build-test-drive-setup = { cmd = "meson setup _build --libdir=lib --warnlevel=0 --default-library=shared --prefix=$CONDA_PREFIX", cwd = ".test-drive" }
-gcc-extended-build-test-drive-compile = { cmd = "meson compile -C _build", cwd = ".test-drive" }
-gcc-extended-build-test-drive-test = { cmd = "meson test -C _build --no-rebuild --print-errorlogs", cwd = ".test-drive" }
-gcc-extended-build-test-drive-install = { cmd = "meson install -C _build --no-rebuild", cwd = ".test-drive" }
-gcc-extended-build-test-drive-rebuild = { depends-on = [
-    "gcc-extended-build-test-drive-clone",
-    "gcc-extended-build-test-drive-setup",
-    "gcc-extended-build-test-drive-compile",
-    "gcc-extended-build-test-drive-test",
-    "gcc-extended-build-test-drive-install",
-] }
 gcc-extended-build-update = { depends-on = [
     "gcc-extended-build-update-pc-files",
-    "gcc-extended-build-test-drive-rebuild",
 ] }
 

@@ -9,6 +9,7 @@ module ChfCxsInputModule
   public chf_cxs_block_definitions
   public ChfCxsParamFoundType
   public chf_cxs_multi_package
+  public chf_cxs_is_advanced
   public chf_cxs_subpackages
 
   type ChfCxsParamFoundType
@@ -24,6 +25,7 @@ module ChfCxsInputModule
   end type ChfCxsParamFoundType
 
   logical :: chf_cxs_multi_package = .false.
+  logical :: chf_cxs_is_advanced = .false.
 
   character(len=16), parameter :: &
     chf_cxs_subpackages(*) = &
