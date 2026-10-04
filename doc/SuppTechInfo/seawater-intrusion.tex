@@ -196,6 +196,35 @@ Substituting $S^{f}=S^{w}-S^{s}$ into the flow term of equation~\ref{eqn:swi-fvf
 
 \noindent The first term on the right is the term that would be assembled for a standard \mf model. For flow, SWI passes the combined freshwater fraction $S^{f}$ to NPF, so the flow term is assembled once using a single upstream weighting. Equation~\ref{eqn:swi-split} is therefore useful primarily for showing the relationship to the standard formulation. Storage is handled differently: the water column represented by $S^{w}$ and the saltwater column represented by $S^{s}$ are assembled separately, as described below.
 
+Table~\ref{tab:swi-phases} collects the terms that the SWI formulation contributes in each phase of the \mf cell assembly, for both models. The flow terms replace the standard conductance on the connections the package owns. The freshwater storage terms, by contrast, are added to the water column that the standard storage formulation assembles, because that column is exactly the $S^{w}$ assembly of equation~\ref{eqn:swi-twocol}; the saltwater model has no water column of its own and supplies its storage terms entirely.
+
+\begin{table}[!ht]
+	\caption[Terms contributed by the SWI formulation in each assembly phase]{Terms contributed by the SWI flow and storage formulations in each phase of the \mf cell assembly, for the freshwater and saltwater models. The standard formulation supplies the total-water saturated cell fraction $S^{w}$ in the flow calculation phase, and the water column in the freshwater storage phases. Symbols are defined in the text}
+	\label{tab:swi-phases}
+	\small
+	\centering
+	\begin{tabular}{l >{\raggedright\arraybackslash}p{0.32\textwidth} >{\raggedright\arraybackslash}p{0.32\textwidth}}
+		\hline
+		\hline
+		Phase & Freshwater model & Saltwater model \\
+		\hline
+		\multicolumn{3}{l}{\textit{Flow}} \\
+		\texttt{cf} & elevation bounds of the freshwater zone, used by the well flow reduction & elevation bounds of the saltwater zone \\
+		\texttt{fc}, horizontal & $S^{f}C_{nm}=\left(S^{w}-S^{s}\right)C_{nm}$ & $S^{s}C^{s}_{nm}$ \\
+		\texttt{fc}, vertical & unrestricted in single-fluid mode; buoyancy-restricted in two-fluid mode & buoyancy-restricted \\
+		\texttt{fn} & $\partial S^{f}/\partial h^{f}=\mathcal{S}'(h^{f})+\alpha_{f}\mathcal{S}'(\zeta)$; horizontal only & $\partial S^{s}/\partial h^{s}=\alpha_{s}\mathcal{S}'(\zeta)$; horizontal only \\
+		\texttt{cq} & $S^{f}C_{nm}\left(h^{f}_{m}-h^{f}_{n}\right)$ & $S^{s}C^{s}_{nm}\left(h^{s}_{m}-h^{s}_{n}\right)$ \\
+		\hline
+		\multicolumn{3}{l}{\textit{Storage}} \\
+		\texttt{fc} & salt column subtracted from the water column & salt column, driven by $h^{s}$ \\
+		\texttt{fn} & $\left(V_{n}S_{y}/\Delta t\right)\alpha_{f}\mathcal{S}'(\zeta)$ & $\left(V_{n}S_{y}/\Delta t\right)\alpha_{s}\mathcal{S}'(\zeta)$ \\
+		\texttt{cq} & salt-column rate subtracted from the storage rates; SWI storage term recorded & salt-column rates; SWI storage term recorded \\
+		budget & SWI storage term added to the model budget & SWI storage term added to the model budget \\
+		\hline
+		\hline
+	\end{tabular}
+\end{table}
+
 \subsection{Newton--Raphson Formulation}
 
 For the freshwater equation, define the residual as $F_{n}^{f}=Q_{n}^{f,\mathrm{sto}}-\sum_{m}Q_{nm}^{f}-\dot W_{f}=0$. A Newton expansion with respect to the two primary heads gives
