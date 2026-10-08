@@ -316,22 +316,7 @@ def test_wel_options_error_file(function_tmpdir, targets):
 
 def test_lak_packagedata_bad_aux_error_no_crash(function_tmpdir, targets):
     """A LAK PACKAGEDATA aux value that is neither numeric nor a defined
-    time-series name must be reported as a normal input error, not crash.
-
-    read_value_or_time_series_adv() falls back to treating a non-numeric
-    aux token as a time-series name and looks it up via
-    TimeSeriesManager%get_time_series(). That function's BndTsHashTable is
-    only allocated when the simulation has at least one TS6 file
-    (tsmanager_df() calls HashBndTimeSeries() only if numtsfiles > 0), so
-    with none present here, the hash table pointer stays unassociated. Before
-    the fix, get_time_series() dereferenced it unconditionally and crashed
-    with SIGSEGV instead of falling through to the intended
-    "Expected numeric value or time-series name" error.
-
-    A caller ending up with a non-numeric aux value like this is easy in
-    practice: e.g. mis-ordering a packagedata row so a boundname lands in
-    the aux position (aux is written before boundname in PACKAGEDATA).
-    """
+    time-series name is reported as an input error."""
     mf6 = targets["mf6"]
 
     sim = get_minimal_gwf_simulation(str(function_tmpdir), exe=mf6)
@@ -348,9 +333,7 @@ def test_lak_packagedata_bad_aux_error_no_crash(function_tmpdir, targets):
     sim.write_simulation()
 
     # rewrite the PACKAGEDATA row with aux and boundname swapped -- "mylake"
-    # (not numeric, not a TS6 name) ends up in the aux column. No TS6 files
-    # are referenced anywhere in this simulation, so BndTsHashTable is never
-    # allocated.
+    # (not numeric, not a TS6 name) ends up in the aux column.
     lak_file = function_tmpdir / "test.lak"
     lines = lak_file.read_text().splitlines(keepends=True)
     in_packagedata = False
@@ -372,9 +355,7 @@ def test_lak_packagedata_bad_aux_error_no_crash(function_tmpdir, targets):
     assert "SIGSEGV" not in output, (
         f"mf6 crashed instead of reporting an error:\n{output}"
     )
-    # mf6 wraps this message across lines, so check the two halves separately
-    assert "Expected numeric value or time-series name, but" in output, output
-    assert "found 'mylake'." in output, output
+    assert 'Error converting "mylake" to a real number' in output, output
     assert "Error occurred while reading file 'test.lak'" in output
 
 
@@ -419,3 +400,82 @@ def test_fail_continue_success(function_tmpdir, targets):
     final_message = "Normal termination of simulation."
     failure_message = f'mf6 did not terminate with "{final_message}"'
     assert final_message in buff[0], failure_message
+
+
+def test_hfb_duplicate_connection_error(function_tmpdir, targets):
+    """Two HFBs on one cell connection must be rejected, in either cell order.
+
+    check_data() resolves each barrier's connection to a position in the model
+    ja array and stores it in idxloc. Nothing checked that two barriers had
+    resolved to the same connection, and the rest of the package assumes one
+    barrier per connection: condsat_modify() saves condsat before overwriting
+    it, so a second barrier on the same connection saved the value the first
+    had already modified, and condsat_reset() then restored that instead of the
+    original -- leaving condsat permanently barrier-corrected and drifting
+    further every stress period. The non-Newton branch of hfb_fc() likewise
+    read the matrix value it was about to overwrite, so the second barrier
+    subtracted its correction from the diagonal a second time.
+    """
+    mf6 = targets["mf6"]
+
+    sim = get_minimal_gwf_simulation(str(function_tmpdir), exe=mf6)
+    gwf = sim.get_model("test")
+    # barrier 2 repeats barrier 1; barrier 3 repeats it with the cells
+    # reversed, which is the same symmetric connection
+    hfb_data = [
+        ((0, 2, 1), (0, 2, 2), 1.0e-3),
+        ((0, 2, 1), (0, 2, 2), 1.0e-3),
+        ((0, 2, 2), (0, 2, 1), 1.0e-3),
+    ]
+    flopy.mf6.ModflowGwfhfb(gwf, maxhfb=len(hfb_data), stress_period_data={0: hfb_data})
+    sim.write_simulation()
+
+    returncode, buff = run_mf6([mf6], str(function_tmpdir))
+    assert returncode != 0, "mf6 should have failed on duplicate HFBs"
+
+    output = "\n".join(buff)
+    assert "HFB no. 1 and HFB no. 2 are both between cells" in output, output
+    assert "HFB no. 1 and HFB no. 3 are both between cells" in output, output
+    assert "Only one HFB can be assigned to a cell connection." in output, output
+    assert "ERROR OCCURRED WHILE READING FILE 'test.hfb'" in output, output
+
+
+def test_hfb_duplicate_connection_error_inactive_cell(function_tmpdir, targets):
+    """The barrier numbers in the duplicate error count active barriers only.
+
+    source_data() drops a barrier attached to an inactive (IDOMAIN) cell with
+    a warning and numbers the remaining barriers consecutively, so the
+    "HFB no." reported by check_data() is the position among the active
+    barriers -- the same numbering the package prints with PRINT_INPUT -- not
+    the input row. With the inactive barrier in row 1 and duplicates in rows 2
+    and 3, the error must name HFB no. 1 and 2.
+    """
+    mf6 = targets["mf6"]
+
+    sim = get_minimal_gwf_simulation(str(function_tmpdir), exe=mf6)
+    gwf = sim.get_model("test")
+    # barrier 1 touches the inactive cell and is excluded with a warning;
+    # barriers 2 and 3 are duplicates and become active barriers 1 and 2
+    hfb_data = [
+        ((0, 1, 1), (0, 1, 2), 1.0e-3),
+        ((0, 2, 1), (0, 2, 2), 1.0e-3),
+        ((0, 2, 1), (0, 2, 2), 1.0e-3),
+    ]
+    flopy.mf6.ModflowGwfhfb(gwf, maxhfb=len(hfb_data), stress_period_data={0: hfb_data})
+    # deactivate the cell after the package is built: flopy rejects a cellid
+    # in an inactive cell, mf6 excludes the barrier with a warning
+    idomain = np.ones(
+        (gwf.dis.nlay.get_data(), gwf.dis.nrow.get_data(), gwf.dis.ncol.get_data()),
+        dtype=int,
+    )
+    idomain[0, 1, 1] = 0
+    gwf.dis.idomain.set_data(idomain)
+    sim.write_simulation()
+
+    returncode, buff = run_mf6([mf6], str(function_tmpdir))
+    assert returncode != 0, "mf6 should have failed on duplicate HFBs"
+
+    output = "\n".join(buff)
+    assert "HFB no. 1 and HFB no. 2 are both between cells" in output, output
+    assert "HFB no. 2 and HFB no. 3" not in output, output
+    assert "ERROR OCCURRED WHILE READING FILE 'test.hfb'" in output, output

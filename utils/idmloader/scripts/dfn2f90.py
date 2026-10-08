@@ -1,4 +1,5 @@
 import argparse
+import re
 import textwrap
 from collections import Counter
 from dataclasses import dataclass
@@ -170,6 +171,20 @@ def parse_dfn(dfnfspec: Path, common: dict | None = None) -> DfnFile:
     with dfnfspec.open(encoding="utf-8") as f:
         flat, _ = Dfn._load_v1_flat(f, common=common)
 
+    # Map each recarray/keystring block to its own member column names, so a
+    # member's shape can be checked against its siblings (see ragged-shape
+    # detection below) without a separate parsing pass.
+    block_recarray_members: dict[str, set] = {}
+    for vd in flat.values(multi=True):
+        t = (vd.get("type") or "").lower()
+        if t.startswith("recarray") or t.startswith("keystring"):
+            # a block may define more than one (e.g. MAW's PERIOD has both a
+            # recarray and a keystring) -- union, don't overwrite
+            block_upper = vd.get("block", "").upper()
+            block_recarray_members.setdefault(block_upper, set()).update(
+                m.upper() for m in t.split()[1:]
+            )
+
     # Track blocks in DFN order
     block_names_ordered = []
     block_data = {}  # blockname -> tracking dict
@@ -221,7 +236,34 @@ def parse_dfn(dfnfspec: Path, common: dict | None = None) -> DfnFile:
             shape = mf6dimension
         if component.upper() == "EXG" and vn in ("CELLIDM1", "CELLIDM2"):
             shape = "(ncelldim)"
-        shape = shape.replace("(", "").replace(")", "").replace(",", "").upper()
+        # Some shapes are expressions the generic tokenizer below would
+        # mangle (e.g. "sum(nlakeconn)" -> "SUMNLAKECONN"), so detect them
+        # first.
+        shape_inner = shape.strip()
+        if shape_inner.startswith("(") and shape_inner.endswith(")"):
+            shape_inner = shape_inner[1:-1]
+        sum_match = re.fullmatch(r"sum\(\s*(\w+)\s*\)", shape_inner, re.IGNORECASE)
+        nested_match = re.fullmatch(r"(\w+)\(\s*(\w+)\s*\)", shape_inner, re.IGNORECASE)
+        # Ragged iff the inner name is a sibling column (SFR's IC:
+        # ncon(ifno)) -- looked up by that row's value, not row position, so
+        # no shape variable can express it. A bare ref with no nesting
+        # (DISV's ICVERT: ncvert) is the already-handled row-position case.
+        ragged_match = (
+            nested_match
+            and not sum_match
+            and nested_match.group(2).upper()
+            in block_recarray_members.get(blockname_upper, set())
+        )
+        if sum_match:
+            # Keep "SUM(...)" literal in the generated shape -- the loader
+            # pattern-matches it at load time -- so skip the tokenizer below.
+            shape = f"SUM({sum_match.group(1).upper()})"
+        else:
+            if ragged_match:
+                # Per-row variable-length column; loader reads to end of
+                # record instead of a fixed width.
+                shape = "(:)"
+            shape = shape.replace("(", "").replace(")", "").replace(",", "").upper()
         if mf6vn == "AUXVAR":
             if shape == "NCOL*NROW; NCPL":
                 shape = "NAUX NCPL"
