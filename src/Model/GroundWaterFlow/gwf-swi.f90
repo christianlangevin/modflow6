@@ -103,8 +103,6 @@ module GwfSwiModule
     class(GwfSwiType), pointer :: swi => null() !< owning SWI package
     type(GwfNpfType), pointer :: npf => null() !< the model NPF package
   contains
-    procedure :: prepare_iteration => swinpf_prepare_iteration
-    procedure :: is_active => swinpf_is_active
     procedure :: cf => swinpf_cf
     procedure :: fc => swinpf_fc
     procedure :: fn => swinpf_fn
@@ -292,10 +290,14 @@ contains
       end do
     end do
 
-    ! register the SWI STO storage formulation and flag its cells so STO
-    ! dispatches storage fc/fn/cq (and bd/save_flows) to the SWI override. The
-    ! override assembles freshwater storage as the water column (S^w, via the STO
-    ! default) minus the salt column (S^s); the SWI storage budget term is the
+    ! register the SWI STO storage formulation. Storage formulations compose
+    ! additively, so the claim mask is only set where SWI must replace the
+    ! standard storage entirely. A freshwater model assembles its storage as
+    ! the water column (S^w) minus the salt column (S^s): the default storage
+    ! formulation supplies the water column and SWI leaves its cells unclaimed
+    ! so that it runs, adding only the salt-column correction. A saltwater
+    ! model has no water-column term of its own, so it claims its cells and the
+    ! default skips them. The SWI storage budget term is the
     ! interface-movement (fresh<->salt conversion) volume.
     if (this%insto > 0) then
       allocate (sto_form)
@@ -303,9 +305,11 @@ contains
       sto_form%sto => sto
       this%sto_form => sto_form
       call sto%add_sto_formulation(this%sto_form, SWI_STORAGE)
-      do n = 1, sto%dis%nodes
-        sto%iformulation(n) = SWI_STORAGE
-      end do
+      if (this%isaltwater == 1) then
+        do n = 1, sto%dis%nodes
+          sto%iformulation(n) = SWI_STORAGE
+        end do
+      end if
     end if
 
   end subroutine swi_ar
@@ -768,16 +772,6 @@ contains
     return
   end subroutine swi_thksat
 
-  !> @brief SWI NPF formulation: is this connection handled by SWI?
-  !<
-  function swinpf_is_active(this, n, m) result(is_active)
-    class(SwiNpfFormulationType), intent(inout) :: this
-    integer(I4B), intent(in) :: n
-    integer(I4B), intent(in) :: m
-    logical(LGP) :: is_active
-    is_active = .true.
-  end function swinpf_is_active
-
   !> @brief SWI NPF formulation: per-iteration preparation.
   !!
   !! Refresh the NPF flow-reduction interval from the current heads. The
@@ -799,7 +793,7 @@ contains
   !! coupling is pure Picard with no Newton term, and the undamped update can
   !! oscillate. The relaxed bound converges to the current-head value as the
   !! iterations converge, so the reduced rate is still exact at convergence.
-  subroutine swinpf_prepare_iteration(this, kiter)
+  subroutine swinpf_cf(this, kiter)
     class(SwiNpfFormulationType), intent(inout) :: this
     integer(I4B), intent(in) :: kiter
     ! local
@@ -826,14 +820,6 @@ contains
         end if
       end do
     end if
-  end subroutine swinpf_prepare_iteration
-
-  !> @brief SWI NPF formulation: per-cell precompute (zeta is updated elsewhere)
-  !<
-  subroutine swinpf_cf(this, kiter, n)
-    class(SwiNpfFormulationType), intent(inout) :: this
-    integer(I4B), intent(in) :: kiter
-    integer(I4B), intent(in) :: n
   end subroutine swinpf_cf
 
   !> @brief SWI NPF formulation: vertical conductance for a connection between an
@@ -1007,7 +993,7 @@ contains
                 min(tthkn, tthkm))
   end function swinpf_condf
 
-  subroutine swinpf_fc(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
+  subroutine swinpf_fc_conn(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
     class(SwiNpfFormulationType), intent(inout) :: this
     integer(I4B), intent(in) :: n
     integer(I4B), intent(in) :: m
@@ -1030,13 +1016,13 @@ contains
     call matrix_sln%add_value_pos(idxglo(idiag), -condf)
     call matrix_sln%add_value_pos(idxglo(isymcon), condf)
     call matrix_sln%add_value_pos(idxglo(idiagm), -condf)
-  end subroutine swinpf_fc
+  end subroutine swinpf_fc_conn
 
   !> @brief SWI NPF formulation: Newton terms for the freshwater flow override.
   !! Mirrors fn_default_flow but uses the freshwater saturation derivative
   !! dS^f/dh = S'(h) + alphaf*S'(zeta) of the upstream cell. Horizontal only.
   !<
-  subroutine swinpf_fn(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
+  subroutine swinpf_fn_conn(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
     use SmoothingModule, only: sQuadraticSaturationDerivative
     class(SwiNpfFormulationType), intent(inout) :: this
     integer(I4B), intent(in) :: n
@@ -1109,7 +1095,7 @@ contains
       end if
       call matrix_sln%add_value_pos(idxglo(idiagm), -term)
     end if
-  end subroutine swinpf_fn
+  end subroutine swinpf_fn_conn
 
   !> @brief SWI NPF formulation: intercell (FLOW-JA-FACE) flow for connection
   !! ipos, using the same fluid-zone conductance as swinpf_fc so the cell-by-cell
@@ -1118,7 +1104,7 @@ contains
   !! vertical connections: swinpf_condf routes vertical connections to the
   !! buoyancy-restricted conductance (swinpf_vcondf).
   !<
-  subroutine swinpf_cq(this, n, m, ipos, flowja, h_new)
+  subroutine swinpf_cq_conn(this, n, m, ipos, flowja, h_new)
     class(SwiNpfFormulationType), intent(inout) :: this
     integer(I4B), intent(in) :: n
     integer(I4B), intent(in) :: m
@@ -1134,6 +1120,84 @@ contains
     qnm = condf * (h_new(m) - h_new(n))
     flowja(ipos) = qnm
     flowja(npf%dis%con%isym(ipos)) = -qnm
+  end subroutine swinpf_cq_conn
+
+  !> @brief SWI NPF formulation: fill coefficients over all SWI connections.
+  !!
+  !! The formulation owns its traversal: it visits every connection and
+  !! contributes only on the faces SWI claims through npf%iformulation, which
+  !! the default conductance formulation skips.
+  !<
+  subroutine swinpf_fc(this, kiter, matrix_sln, idxglo, rhs, hnew)
+    class(SwiNpfFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: kiter
+    class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
+    integer(I4B), dimension(:), intent(in) :: idxglo
+    real(DP), dimension(:), intent(inout) :: rhs
+    real(DP), dimension(:), intent(inout) :: hnew
+    ! local
+    type(GwfNpfType), pointer :: npf
+    integer(I4B) :: n, m, ipos
+    !
+    npf => this%npf
+    do n = 1, npf%dis%nodes
+      do ipos = npf%dis%con%ia(n) + 1, npf%dis%con%ia(n + 1) - 1
+        if (npf%dis%con%mask(ipos) == 0) cycle
+        m = npf%dis%con%ja(ipos)
+        if (m < n) cycle
+        if (npf%iformulation(ipos) /= SWI_FLOW) cycle
+        call swinpf_fc_conn(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
+      end do
+    end do
+  end subroutine swinpf_fc
+
+  !> @brief SWI NPF formulation: Newton terms over all SWI connections.
+  !<
+  subroutine swinpf_fn(this, kiter, matrix_sln, idxglo, rhs, hnew)
+    class(SwiNpfFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: kiter
+    class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
+    integer(I4B), dimension(:), intent(in) :: idxglo
+    real(DP), dimension(:), intent(inout) :: rhs
+    real(DP), dimension(:), intent(inout) :: hnew
+    ! local
+    type(GwfNpfType), pointer :: npf
+    integer(I4B) :: n, m, ipos
+    !
+    npf => this%npf
+    do n = 1, npf%dis%nodes
+      do ipos = npf%dis%con%ia(n) + 1, npf%dis%con%ia(n + 1) - 1
+        if (npf%dis%con%mask(ipos) == 0) cycle
+        m = npf%dis%con%ja(ipos)
+        if (m < n) cycle
+        if (npf%iformulation(ipos) /= SWI_FLOW) cycle
+        call swinpf_fn_conn(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
+      end do
+    end do
+  end subroutine swinpf_fn
+
+  !> @brief SWI NPF formulation: flows over all SWI connections.
+  !!
+  !! Masked connections are visited here, matching the default flow
+  !! formulation, which does not apply the connection mask in cq.
+  !<
+  subroutine swinpf_cq(this, hnew, flowja)
+    class(SwiNpfFormulationType), intent(inout) :: this
+    real(DP), dimension(:), intent(inout) :: hnew
+    real(DP), dimension(:), intent(inout) :: flowja
+    ! local
+    type(GwfNpfType), pointer :: npf
+    integer(I4B) :: n, m, ipos
+    !
+    npf => this%npf
+    do n = 1, npf%dis%nodes
+      do ipos = npf%dis%con%ia(n) + 1, npf%dis%con%ia(n + 1) - 1
+        m = npf%dis%con%ja(ipos)
+        if (m < n) cycle
+        if (npf%iformulation(ipos) /= SWI_FLOW) cycle
+        call swinpf_cq_conn(this, n, m, ipos, flowja, hnew)
+      end do
+    end do
   end subroutine swinpf_cq
 
   !> @brief SWI STO formulation: is this cell handled by SWI storage?
@@ -1153,7 +1217,7 @@ contains
   !! so it converges under Picard on its own; the smoothed-tangent upgrade for the
   !! interface-movement (drainable) term is added in swisto_fn (Newton only).
   !<
-  subroutine swisto_fc(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
+  subroutine swisto_fc_node(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
     use TdisModule, only: delt
     use GwfStorageUtilsModule, only: SsCapacity, SyCapacity, SsTerms
     class(SwiStoFormulationType), intent(inout) :: this
@@ -1183,8 +1247,9 @@ contains
     bt = sto%dis%bot(n)
     tthk = tp - bt
     !
-    ! -- water column (S^w): standard STO default fill (bottom-referenced)
-    call sto%fc_default_sto(n, matrix_sln, rhs, idxglo, h_old, h_new)
+    ! -- water column (S^w) is assembled by the default storage formulation,
+    !    which runs first because a freshwater model does not claim its cells;
+    !    SWI adds only the salt-column correction below
     !
     ! -- salt column (S^s) smoothed saturations: S^s = sat(zeta)
     ssnew = sQuadraticSaturation(tp, bt, this%swi%get_zetanew(n), sto%satomega)
@@ -1234,7 +1299,7 @@ contains
     rhsterm = aterm * h_new(n) + rate_s
     call matrix_sln%add_value_pos(idxglo(idiag), aterm)
     rhs(n) = rhs(n) + rhsterm
-  end subroutine swisto_fc
+  end subroutine swisto_fc_node
 
   !> @brief SWI STO formulation: storage Newton terms for cell n. Upgrades the
   !! residual-consistent chord diagonals filled in swisto_fc to the exact smoothed
@@ -1243,7 +1308,7 @@ contains
   !! set in swisto_fc), so it only sharpens the Jacobian. Called only when Newton
   !! is active (sto_fn dispatch).
   !<
-  subroutine swisto_fn(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
+  subroutine swisto_fn_node(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
     use TdisModule, only: delt
     use GwfStorageUtilsModule, only: SyCapacity
     class(SwiStoFormulationType), intent(inout) :: this
@@ -1267,9 +1332,8 @@ contains
       return
     end if
     !
-    ! -- water column (S^w): standard STO default Newton tangent (upgrades the
-    !    fc_default_sto chord)
-    call sto%fn_default_sto(n, matrix_sln, rhs, idxglo, h_old, h_new)
+    ! -- water column (S^w) Newton tangent comes from the default storage
+    !    formulation; SWI adds only the salt-column tangent below
     !
     ! -- salt column (S^s): smoothed interface tangent delta over the chord in
     !    swisto_fc, applied only while the interface is within the cell
@@ -1290,7 +1354,7 @@ contains
       call matrix_sln%add_value_pos(idxglo(idiag), a_fn)
       rhs(n) = rhs(n) + a_fn * h_new(n)
     end if
-  end subroutine swisto_fn
+  end subroutine swisto_fn_node
 
   !> @brief SWI STO formulation: freshwater storage rate for cell n, in override
   !! form. The water column (S^w) rate comes from the STO default (fills
@@ -1300,7 +1364,7 @@ contains
   !! also added to flowja. COMMIT 1: reproduces the former swi_cq storage block
   !! for the single-fluid freshwater model.
   !<
-  subroutine swisto_cq(this, n, flowja, h_new, h_old)
+  subroutine swisto_cq_node(this, n, flowja, h_new, h_old)
     use TdisModule, only: delt
     use GwfStorageUtilsModule, only: SsCapacity, SyCapacity, SsTerms, SyTerms
     class(SwiStoFormulationType), intent(inout) :: this
@@ -1322,8 +1386,8 @@ contains
       call swisto_cq_salt(this, n, flowja, h_new, h_old)
       return
     end if
-    ! -- water column (S^w): standard STO default rate (fills strgss/strgsy)
-    call sto%cq_default_sto(n, flowja, h_new, h_old)
+    ! -- water column (S^w) rate (strgss/strgsy) is filled by the default
+    !    storage formulation; SWI accumulates its salt-column correction
     if (sto%iss == 1) return
     if (this%swi%ibound(n) < 1) return
     tled = DONE / delt
@@ -1370,7 +1434,7 @@ contains
     rate_s = rho2old * tthk * ssold - rho2 * tthk * ssnew
     this%swi%storage(n) = -rate_s
     flowja(idiag) = flowja(idiag) + this%swi%storage(n)
-  end subroutine swisto_cq
+  end subroutine swisto_cq_node
 
   !> @brief SWI STO formulation (saltwater model): storage fill for cell n. The
   !! saltwater storage is over the salt column S^s = sat(zeta), which is
@@ -1540,6 +1604,65 @@ contains
     this%swi%storage(n) = ratess + ratesy
     flowja(idiag) = flowja(idiag) + this%swi%storage(n)
   end subroutine swisto_cq_salt
+
+  !> @brief SWI STO formulation: storage coefficients over all SWI cells.
+  !!
+  !! The formulation owns its traversal. A freshwater model leaves its cells
+  !! unclaimed so the default storage formulation assembles the water column
+  !! first and SWI adds the salt-column correction; a saltwater model claims
+  !! its cells, so the default skips them and SWI supplies the salt column.
+  !<
+  subroutine swisto_fc(this, kiter, matrix_sln, rhs, idxglo, h_old, h_new)
+    class(SwiStoFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: kiter
+    class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
+    real(DP), dimension(:), intent(inout) :: rhs
+    integer(I4B), dimension(:), intent(in) :: idxglo
+    real(DP), dimension(:), intent(in) :: h_old
+    real(DP), dimension(:), intent(in) :: h_new
+    ! local
+    integer(I4B) :: n
+    !
+    do n = 1, this%sto%dis%nodes
+      if (.not. this%is_active(n)) cycle
+      call swisto_fc_node(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
+    end do
+  end subroutine swisto_fc
+
+  !> @brief SWI STO formulation: storage Newton terms over all SWI cells.
+  !<
+  subroutine swisto_fn(this, kiter, matrix_sln, rhs, idxglo, h_old, h_new)
+    class(SwiStoFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: kiter
+    class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
+    real(DP), dimension(:), intent(inout) :: rhs
+    integer(I4B), dimension(:), intent(in) :: idxglo
+    real(DP), dimension(:), intent(in) :: h_old
+    real(DP), dimension(:), intent(in) :: h_new
+    ! local
+    integer(I4B) :: n
+    !
+    do n = 1, this%sto%dis%nodes
+      if (.not. this%is_active(n)) cycle
+      call swisto_fn_node(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
+    end do
+  end subroutine swisto_fn
+
+  !> @brief SWI STO formulation: storage flows over all SWI cells.
+  !<
+  subroutine swisto_cq(this, flowja, h_new, h_old)
+    class(SwiStoFormulationType), intent(inout) :: this
+    real(DP), dimension(:), intent(inout) :: flowja
+    real(DP), dimension(:), intent(in) :: h_new
+    real(DP), dimension(:), intent(in) :: h_old
+    ! local
+    integer(I4B) :: n
+    !
+    do n = 1, this%sto%dis%nodes
+      if (.not. this%is_active(n)) cycle
+      call swisto_cq_node(this, n, flowja, h_new, h_old)
+    end do
+  end subroutine swisto_cq
 
   !> @brief SWI STO formulation: add SWI storage to the model budget
   !<
