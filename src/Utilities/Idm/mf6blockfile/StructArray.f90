@@ -332,16 +332,20 @@ contains
     class(StructArrayType) :: this !< StructArrayType
     type(StructVectorType), intent(inout) :: sv
     type(CharacterStringType), dimension(:), pointer, contiguous :: charstr1d
-    integer(I4B) :: j
+    integer(I4B) :: j, nrow
 
     if (this%deferred_shape) then
+      ! shape not known, allocate locally
+      nrow = this%deferred_size_init
       allocate (charstr1d(this%deferred_size_init))
     else
+      ! shape known, allocate in managed memory
+      nrow = this%nrow
       call mem_allocate(charstr1d, sv%charlen, this%nrow, &
                         sv%idt%mf6varname, this%mempath)
     end if
 
-    do j = 1, this%nrow
+    do j = 1, nrow
       charstr1d(j) = ''
     end do
 

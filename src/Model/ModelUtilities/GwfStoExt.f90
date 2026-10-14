@@ -34,30 +34,29 @@ module GwfStoExtModule
       integer(I4B), intent(in) :: n
       logical(LGP) :: is_active
     end function
-    subroutine fc_if(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
+    subroutine fc_if(this, kiter, matrix_sln, rhs, idxglo, h_old, h_new)
       import GwfStoFormulationType, MatrixBaseType, I4B, DP
       class(GwfStoFormulationType), intent(inout) :: this
-      integer(I4B), intent(in) :: n
+      integer(I4B), intent(in) :: kiter
       class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
       real(DP), dimension(:), intent(inout) :: rhs
       integer(I4B), dimension(:), intent(in) :: idxglo
       real(DP), dimension(:), intent(in) :: h_old
       real(DP), dimension(:), intent(in) :: h_new
     end subroutine
-    subroutine fn_if(this, n, matrix_sln, rhs, idxglo, h_old, h_new)
+    subroutine fn_if(this, kiter, matrix_sln, rhs, idxglo, h_old, h_new)
       import GwfStoFormulationType, MatrixBaseType, I4B, DP
       class(GwfStoFormulationType), intent(inout) :: this
-      integer(I4B), intent(in) :: n
+      integer(I4B), intent(in) :: kiter
       class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
       real(DP), dimension(:), intent(inout) :: rhs
       integer(I4B), dimension(:), intent(in) :: idxglo
       real(DP), dimension(:), intent(in) :: h_old
       real(DP), dimension(:), intent(in) :: h_new
     end subroutine
-    subroutine cq_if(this, n, flowja, h_new, h_old)
+    subroutine cq_if(this, flowja, h_new, h_old)
       import GwfStoFormulationType, I4B, DP
       class(GwfStoFormulationType), intent(inout) :: this
-      integer(I4B), intent(in) :: n
       real(DP), dimension(:), intent(inout) :: flowja
       real(DP), dimension(:), intent(in) :: h_new
       real(DP), dimension(:), intent(in) :: h_old

@@ -707,12 +707,14 @@ contains
     ! -- dummy
     class(ObsType) :: this
     ! formats
-50  format('(g', i2.2, '.', i2.2, ')')
+50  format('(g', i2.2, '.', i2.2, 'e3)')
     !
+    ! -- E3 keeps the E for any exponent; the width DIGITS + 8 holds the
+    !    longest value, a sign, "0.", the digits, and an exponent such as E-119
     if (this%idigits == 0) then
       this%obsfmtcont = '(G0)'
     else
-      write (this%obsfmtcont, 50) this%idigits + 7, this%idigits
+      write (this%obsfmtcont, 50) this%idigits + 8, this%idigits
     end if
   end subroutine define_fmts
 

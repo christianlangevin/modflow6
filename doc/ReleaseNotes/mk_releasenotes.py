@@ -1,4 +1,7 @@
-"""Convert the release notes TOML file to a LaTeX file for the PDF build.
+"""Convert release note TOML files to a LaTeX file.
+
+Each release note item is a TOML file in items/ with a section, subsection
+and description. Valid sections and subsections are defined in schema.toml.
 
 Two formats (see --archive). The --archive format is more compact, for the
 archive section of the release notes document, and has a leading version string
@@ -11,6 +14,7 @@ See reset_releasenotes.py for the post-release archive-and-clear step.
 
 import argparse
 import datetime
+import sys
 from pathlib import Path
 from warnings import warn
 
@@ -22,6 +26,7 @@ except ModuleNotFoundError:  # Python < 3.11
     import tomli as tomllib
 
 notes_dir = Path(__file__).parent
+items_dir = notes_dir / "items"
 version_file = Path(__file__).parents[2] / "version.txt"
 version = version_file.read_text().strip()
 date = datetime.date.today().strftime("%b %d, %Y")
@@ -41,8 +46,59 @@ def latest_release():
         raise ValueError(f"{e}; pass --version and --date explicitly") from e
 
 
+def load_schema(schema_path: Path) -> tuple[dict, dict]:
+    """Load the sections and subsections from the schema TOML file."""
+    with open(schema_path, "rb") as schema_file:
+        schema = tomllib.load(schema_file)
+    return schema.get("sections", {}), schema.get("subsections", {})
+
+
+def load_items(
+    items_dir: Path, sections: dict, subsections: dict
+) -> list[tuple[Path, dict]]:
+    """Load and validate the release note TOML files in a directory.
+
+    Returns (path, item) pairs sorted by file name. Raises ValueError listing
+    every invalid item if any is not valid TOML, is missing a required key, or
+    has a section or subsection not defined in the schema. Also raises if the
+    retired develop.toml file is present, e.g. restored by a merge.
+    """
+    legacy_path = items_dir.parent / "develop.toml"
+    if legacy_path.is_file():
+        raise ValueError(
+            f"{legacy_path} is no longer used, move its items to separate files "
+            f"in {items_dir} and delete it (see {items_dir / 'README.md'})"
+        )
+    items = []
+    errors = []
+    for path in sorted(items_dir.glob("*.toml")):
+        try:
+            with open(path, "rb") as item_file:
+                item = tomllib.load(item_file)
+        except tomllib.TOMLDecodeError as e:
+            errors.append(f"{path.name}: invalid TOML: {e}")
+            continue
+        for key in ("section", "subsection", "description"):
+            if key not in item:
+                errors.append(f"{path.name}: missing required key '{key}'")
+        if "section" in item and item["section"] not in sections:
+            errors.append(
+                f"{path.name}: invalid section '{item['section']}'"
+                f", expected one of: {list(sections)}"
+            )
+        if item.get("subsection") and item["subsection"] not in subsections:
+            errors.append(
+                f"{path.name}: invalid subsection '{item['subsection']}'"
+                f", expected one of: {list(subsections)}"
+            )
+        items.append((path, item))
+    if errors:
+        raise ValueError("Invalid release note items:\n" + "\n".join(errors))
+    return items
+
+
 def render(
-    toml_path: Path,
+    schema_path: Path,
     tex_path: Path,
     *,
     template_name: str = "develop.tex.jinja",
@@ -51,25 +107,27 @@ def render(
     version: str = version,
     date: str = date,
 ) -> bool:
-    """Render a release notes TOML file to a LaTeX file.
+    """Render the release note items to a LaTeX file, using the sections and
+    subsections in the schema TOML file at schema_path. Items are read from the
+    items/ directory next to the schema file.
 
     Returns True if notes were rendered, False if there was nothing to render
-    (no TOML file, or no items after any --patch filtering). In the latter case
+    (no schema file, or no items after any --patch filtering). In the latter case
     an empty LaTeX file is still written so downstream document builds succeed.
     """
-    if not toml_path.is_file():
-        warn(f"Release notes TOML file not found: {toml_path}")
+    if not schema_path.is_file():
+        warn(f"Release notes schema file not found: {schema_path}")
         return False
 
     tex_path.unlink(missing_ok=True)
 
     from jinja2 import Environment, FileSystemLoader
 
-    with open(toml_path, "rb") as toml_file:
-        content = tomllib.load(toml_file)
-    sections = content.get("sections", {})
-    subsections = content.get("subsections", {})
-    items = content.get("items", [])
+    sections, subsections = load_schema(schema_path)
+    items = [
+        item
+        for _, item in load_items(schema_path.parent / "items", sections, subsections)
+    ]
     # if patch, only include fixes and examples
     if patch:
         items = [item for item in items if item["section"] in patch_sections]
@@ -80,6 +138,8 @@ def render(
     for item in items:
         if not item.get("subsection"):
             item["subsection"] = ""
+    # items without a subsection come first in their section, with no header
+    subsections = {"": "", **subsections}
     if not any(items):
         warn("No release notes found, aborting")
         # still leave an empty file behind
@@ -118,7 +178,7 @@ if __name__ == "__main__":
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("--toml", default="develop.toml")
+    parser.add_argument("--schema", default="schema.toml")
     parser.add_argument("--tex", default="develop.tex")
     parser.add_argument("--patch", default=False, action="store_true")
     parser.add_argument(
@@ -146,7 +206,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    toml_path = Path(args.toml).expanduser().absolute()
+    schema_path = Path(args.schema).expanduser().absolute()
     tex_path = Path(args.tex).expanduser().absolute()
 
     render_version = version
@@ -156,12 +216,15 @@ if __name__ == "__main__":
         render_version = args.version or release_version
         render_date = args.date or release_date
 
-    render(
-        toml_path,
-        tex_path,
-        template_name=f"{tex_path.name}.jinja",
-        patch=args.patch,
-        archive=args.archive,
-        version=render_version,
-        date=render_date,
-    )
+    try:
+        render(
+            schema_path,
+            tex_path,
+            template_name=f"{tex_path.name}.jinja",
+            patch=args.patch,
+            archive=args.archive,
+            version=render_version,
+            date=render_date,
+        )
+    except ValueError as e:
+        sys.exit(str(e))

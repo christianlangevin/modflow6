@@ -464,7 +464,8 @@ contains
           call this%xt3d_areas(nodes, n, m, jjs01, .true., ar01, ar10, hnew)
           this%qsat(ii01) = qnm * ar01
           ! -- Scale coefficients by actual area.
-          call this%xt3d_areas(nodes, n, m, jjs01, .false., ar01, ar10, hnew)
+          call this%xt3d_areas(nodes, n, m, jjs01, .false., ar01, ar10, hnew, &
+                               this%qsat(ii01))
           chat01 = chat01 * ar01
           chati0 = chati0 * ar01
           chat1j = chat1j * ar01
@@ -660,10 +661,17 @@ contains
       call this%xt3d_qnbrs(nodes, m, n, nnbr1, inbr1, chat1j, hnew, qnbrs)
       qnm = qnm - qnbrs
       ! -- Multiply by saturated area and add correction to qsat.
+      !    xt3d_fc selected the upstream cell from qsat before this
+      !    correction was added. That is consistent only because the HFB
+      !    correction reduces the magnitude of the flow and cannot reverse
+      !    its sign; a future correction that could change the sign of
+      !    qsat would require the upstream cell to be selected after all
+      !    corrections are applied.
       call this%xt3d_areas(nodes, n, m, jjs01, .true., ar01, ar10, hnew)
       this%qsat(ii01) = this%qsat(ii01) + qnm * ar01
       ! -- Scale coefficients by actual area.
-      call this%xt3d_areas(nodes, n, m, jjs01, .false., ar01, ar10, hnew)
+      call this%xt3d_areas(nodes, n, m, jjs01, .false., ar01, ar10, hnew, &
+                           this%qsat(ii01))
       chat01 = chat01 * ar01
       chati0 = chati0 * ar01
       chat1j = chat1j * ar01
@@ -743,9 +751,11 @@ contains
         call this%xt3d_indices(n, m, il0, ii01, jjs01, il01, il10, &
                                ii00, ii11, ii10)
         !
-        ! -- Determine upstream node
+        ! -- Determine upstream node from the direction of the saturated
+        !    xt3d flow (qsat > 0 is flow into n from m), consistent with the
+        !    saturation used to scale the flow in xt3d_areas
         iups = m
-        if (hnew(m) < hnew(n)) iups = n
+        if (this%qsat(ii01) < DZERO) iups = n
         idn = n
         if (iups == n) idn = m
         !
@@ -845,9 +855,13 @@ contains
                                ii00, ii11, ii10)
         !
         ! -- Compute areas.
-        if (this%inewton /= 0) &
+        if (this%inewton /= 0) then
           call this%xt3d_areas(nodes, n, m, jjs01, .true., ar01, ar10, hnew)
-        call this%xt3d_areas(nodes, n, m, jjs01, .false., ar01, ar10, hnew)
+          call this%xt3d_areas(nodes, n, m, jjs01, .false., ar01, ar10, hnew, &
+                               this%qsat(ii01))
+        else
+          call this%xt3d_areas(nodes, n, m, jjs01, .false., ar01, ar10, hnew)
+        end if
         !
         ! -- Compute "conductances" for interface between
         !    cells 0 and 1.
@@ -967,7 +981,8 @@ contains
     !    actual area.
     if (this%inewton /= 0) then
       call this%xt3d_areas(nodes, n, m, jjs01, .true., ar01, ar10, hnew)
-      call this%xt3d_areas(nodes, n, m, jjs01, .false., ar01, ar10, hnew)
+      call this%xt3d_areas(nodes, n, m, jjs01, .false., ar01, ar10, hnew, &
+                           this%qsat(ii01))
       qnm = qnm * ar01
     end if
     !
@@ -1297,13 +1312,16 @@ contains
 
   !> @brief Compute interfacial areas.
   !<
-  subroutine xt3d_areas(this, nodes, n, m, jjs01, lsat, ar01, ar10, hnew)
+  subroutine xt3d_areas(this, nodes, n, m, jjs01, lsat, ar01, ar10, hnew, qsat)
+    ! -- modules
+    use SimModule, only: store_error
     ! -- dummy
     class(Xt3dType) :: this
     logical :: lsat
     integer(I4B) :: nodes, n, m, jjs01
     real(DP) :: ar01, ar10
     real(DP), intent(inout), dimension(:), optional :: hnew
+    real(DP), intent(in), optional :: qsat !< saturated flow into n from m; if present, its sign selects the upstream cell
     ! -- local
     real(DP) :: topn, botn, topm, botm, thksatn, thksatm
     real(DP) :: sill_top, sill_bot, tpn, tpm
@@ -1342,10 +1360,27 @@ contains
         !    areas have already been calculated and are being passed in through
         !    ar01 and ar10. The actual areas are obtained simply by scaling by
         !    the upstream saturation.
-        if (hnew(m) < hnew(n)) then
-          satups = this%sat(n)
+        if (present(qsat)) then
+          !
+          ! -- Upstream cell is the cell the saturated xt3d flow comes from.
+          !    Using the flow direction rather than the head difference keeps
+          !    the product of flow and saturation continuous, because the
+          !    xt3d flow across a face is generally not zero when the heads
+          !    of the two cells are equal.
+          if (qsat < DZERO) then
+            satups = this%sat(n)
+          else
+            satups = this%sat(m)
+          end if
         else
-          satups = this%sat(m)
+          !
+          ! -- Every Newton call for the actual area must provide qsat;
+          !    selecting the upstream cell from the head difference instead
+          !    would reintroduce the discontinuity described above
+          call store_error('Program error: xt3d_areas called for a Newton &
+                           &horizontal connection without the saturated &
+                           &flow qsat.', terminate=.TRUE.)
+          satups = DZERO
         end if
         ar01 = ar01 * satups
       end if

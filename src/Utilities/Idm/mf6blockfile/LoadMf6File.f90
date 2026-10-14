@@ -580,10 +580,11 @@ contains
     integer(I4B) :: icol, iparam
     integer(I4B) :: ncol, nparam
     logical(LGP) :: shape_found
+    logical(LGP) :: is_sum_shape
+    character(len=LINELENGTH) :: shape_name
     integer(I4B), pointer :: pkgdata_maxbound
 
     nrows = -1
-    mem_rank = -1
 
     ! initialize load context
     call ctx%init(this%mf6_input, blockname= &
@@ -611,11 +612,20 @@ contains
     if (blocknum > 0) ncol = ncol + 1
     ! use shape to set the max num of rows
     if (idt%shape /= '') then
+      ! "SUM(name)" means total rows = sum of a per-feature array (e.g.
+      ! LAK's CONNECTIONDATA: NLAKECONN summed across all lakes); this
+      ! notation is declared explicitly in the dfn, not inferred
+      is_sum_shape = .false.
+      shape_name = idt%shape
+      if (idt%shape(1:4) == 'SUM(') then
+        is_sum_shape = .true.
+        shape_name = idt%shape(5:len_trim(idt%shape) - 1)
+      end if
       shape_idt => &
         get_param_definition_type(this%mf6_input%param_dfns, &
                                   this%mf6_input%component_type, &
                                   this%mf6_input%subcomponent_type, &
-                                  'DIMENSIONS', idt%shape, this%filename, &
+                                  'DIMENSIONS', shape_name, this%filename, &
                                   found=shape_found)
       if (.not. shape_found) then
         ! also allow a per-row PACKAGEDATA field (e.g. LAK's NLAKECONN)
@@ -623,7 +633,7 @@ contains
           get_param_definition_type(this%mf6_input%param_dfns, &
                                     this%mf6_input%component_type, &
                                     this%mf6_input%subcomponent_type, &
-                                    'PACKAGEDATA', idt%shape, this%filename, &
+                                    'PACKAGEDATA', shape_name, this%filename, &
                                     found=shape_found)
       end if
       if (shape_found) then
@@ -631,28 +641,35 @@ contains
         if (isize < 0) then
           if (shape_idt%required) then
             write (errmsg, '(3a)') 'Required dimension "', &
-              trim(idt%shape), '" not found.'
+              trim(shape_name), '" not found.'
             call store_error(errmsg)
             call this%parser%StoreErrorUnit()
           end if
         else
+          ! cross-check the dfn's declared SUM(...)/plain shape against the
+          ! variable's actual rank, so a mismatch errors instead of
+          ! silently mis-using a scalar/array pointer
           call get_mem_rank(shape_idt%mf6varname, this%mf6_input%mempath, &
                             mem_rank)
+          if (is_sum_shape .and. mem_rank == 1) then
+            call mem_setptr(int1d, shape_idt%mf6varname, this%mf6_input%mempath)
+            nrows = sum(int1d)
+            nullify (int1d)
+          else if (.not. is_sum_shape .and. mem_rank == 0) then
+            ! scalar shape variable (e.g. NLAKES, MAXBOUND) — use value directly
+            call mem_setptr(nrow, shape_idt%mf6varname, this%mf6_input%mempath)
+            nrows = nrow
+          else
+            write (errmsg, '(5a)') 'Shape variable "', trim(shape_name), &
+              '" rank does not match its declared shape "', &
+              trim(idt%shape), '".'
+            call store_error(errmsg)
+            call this%parser%StoreErrorUnit()
+          end if
         end if
       end if
-      if (mem_rank == 0) then
-        ! scalar shape variable (e.g. NLAKES, MAXBOUND) — use value directly
-        call mem_setptr(nrow, shape_idt%mf6varname, this%mf6_input%mempath)
-        nrows = nrow
-      else if (mem_rank == 1) then
-        ! 1D array shape (e.g. NLAKECONN): sum elements for total row
-        ! count, since sum(nlakeconn) itself isn't DFN-evaluable
-        call mem_setptr(int1d, shape_idt%mf6varname, this%mf6_input%mempath)
-        nrows = sum(int1d)
-        nullify (int1d)
-      end if
-      ! -- else: shape variable not found or unsupported rank; nrows stays
-      !    at its initial -1, so the block falls back to deferred sizing
+      ! -- else: shape variable not found; nrows stays at its initial -1, so
+      !    the block falls back to deferred sizing
     end if
 
     ! create a structured array; use a larger deferred init for blocks with no

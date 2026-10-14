@@ -56,6 +56,7 @@ module GwfStoModule
                                                                               !! with values 0 (= default) up to SIZE_STORAGE_FORM - 1
     type(GwfStoFormContainerType), dimension(MAX_EXT_STO_FORMS), private :: &
       sto_formulations !< alternative storage calculations by extension
+    class(GwfStoFormulationType), pointer :: default_form => null() !< default storage formulation
   contains
     procedure :: sto_ar
     procedure :: sto_rp
@@ -74,12 +75,28 @@ module GwfStoModule
     procedure, private :: source_data
     procedure, private :: log_options
     procedure, private :: save_old_ss_sy
-    ! public so "default + correction" formulations (e.g. SWI) can reuse them
-    procedure :: fc_default_sto
-    procedure :: fn_default_sto
-    procedure :: cq_default_sto
+    procedure, private :: fc_default_sto
+    procedure, private :: fn_default_sto
+    procedure, private :: cq_default_sto
 
   end type
+
+  !> @brief Default storage formulation
+  !!
+  !! Wraps the standard STO fill so it participates in the additive list of
+  !! storage formulations. Nodes claimed by an exclusive formulation are
+  !! skipped.
+  !<
+  type, extends(GwfStoFormulationType) :: DefaultStorageFormulationType
+    class(GwfStoType), pointer :: sto => null() !< owning STO package
+  contains
+    procedure :: is_active => default_storage_is_active
+    procedure :: fc => default_storage_fc
+    procedure :: fn => default_storage_fn
+    procedure :: cq => default_storage_cq
+    procedure :: bd => default_storage_bd
+    procedure :: save_flows => default_storage_save_flows
+  end type DefaultStorageFormulationType
 
 contains
 
@@ -249,7 +266,6 @@ contains
     integer(I4B), intent(in), dimension(:) :: idxglo !< global index model to solution
     real(DP), intent(inout), dimension(:) :: rhs !< right-hand side
     ! -- local variables
-    integer(I4B) :: n
     integer(I4B) :: iform
     ! -- formats
     character(len=*), parameter :: fmtsperror = &
@@ -265,20 +281,42 @@ contains
       call store_error(errmsg, terminate=.TRUE.)
     end if
     !
-    ! -- loop through and calculate storage contribution to hcof and rhs
-    do n = 1, this%dis%nodes
-      if (this%ibound(n) < 1) cycle
-
-      iform = this%iformulation(n)
-      if (iform == DEFAULT_STORAGE) then
-        call this%fc_default_sto(n, matrix_sln, rhs, idxglo, hold, hnew)
-      else
+    ! -- Each active formulation runs over all cells and adds its storage
+    !    terms; the default storage formulation is always active.
+    call this%default_form%fc(kiter, matrix_sln, rhs, idxglo, hold, hnew)
+    do iform = 1, MAX_EXT_STO_FORMS
+      if (this%sto_formulations(iform)%is_active) then
         call this%sto_formulations(iform)%form%fc( &
-          n, matrix_sln, rhs, idxglo, hold, hnew)
+          kiter, matrix_sln, rhs, idxglo, hold, hnew)
       end if
-
     end do
   end subroutine sto_fc
+
+  !> @brief Fill coefficients for the default storage formulation
+  !!
+  !! Runs over all cells and fills the standard STO terms, skipping cells
+  !! claimed by an exclusive formulation.
+  !<
+  subroutine default_storage_fc(this, kiter, matrix_sln, rhs, &
+                                idxglo, h_old, h_new)
+    class(DefaultStorageFormulationType), intent(inout) :: this !< default formulation
+    integer(I4B), intent(in) :: kiter !< outer iteration number
+    class(MatrixBaseType), pointer, intent(inout) :: matrix_sln !< A matrix
+    real(DP), dimension(:), intent(inout) :: rhs !< right-hand side
+    integer(I4B), dimension(:), intent(in) :: idxglo !< global index model to solution
+    real(DP), dimension(:), intent(in) :: h_old !< previous heads
+    real(DP), dimension(:), intent(in) :: h_new !< current heads
+    ! local
+    integer(I4B) :: n
+
+    do n = 1, this%sto%dis%nodes
+      if (this%sto%ibound(n) < 1) cycle
+      ! skip cells claimed by an exclusive formulation
+      if (this%sto%iformulation(n) /= DEFAULT_STORAGE) cycle
+      call this%sto%fc_default_sto(n, matrix_sln, rhs, idxglo, h_old, h_new)
+    end do
+
+  end subroutine default_storage_fc
 
   !> @brief Default storage FC
   !<
@@ -391,26 +429,48 @@ contains
     integer(I4B), intent(in), dimension(:) :: idxglo !< global index model to solution
     real(DP), intent(inout), dimension(:) :: rhs !< right-hand side
     ! -- local variables
-    integer(I4B) :: n
     integer(I4B) :: iform
     !
     ! -- test if steady-state stress period
     if (this%iss /= 0) return
     !
-    ! -- loop through and calculate storage contribution to hcof and rhs
-    do n = 1, this%dis%nodes
-      if (this%ibound(n) <= 0) cycle
-      iform = this%iformulation(n)
-      !
-      if (iform == DEFAULT_STORAGE) then
-        call this%fn_default_sto(n, matrix_sln, rhs, idxglo, hold, hnew)
-      else
+    ! -- Each active formulation runs over all cells and adds its newton
+    !    terms; the default storage formulation is always active.
+    call this%default_form%fn(kiter, matrix_sln, rhs, idxglo, hold, hnew)
+    do iform = 1, MAX_EXT_STO_FORMS
+      if (this%sto_formulations(iform)%is_active) then
         call this%sto_formulations(iform)%form%fn( &
-          n, matrix_sln, rhs, idxglo, hold, hnew)
+          kiter, matrix_sln, rhs, idxglo, hold, hnew)
       end if
 
     end do
   end subroutine sto_fn
+
+  !> @brief Fill newton terms for the default storage formulation
+  !!
+  !! Runs over all cells and fills the standard STO newton terms, skipping
+  !! cells claimed by an exclusive formulation.
+  !<
+  subroutine default_storage_fn(this, kiter, matrix_sln, rhs, &
+                                idxglo, h_old, h_new)
+    class(DefaultStorageFormulationType), intent(inout) :: this !< default formulation
+    integer(I4B), intent(in) :: kiter !< outer iteration number
+    class(MatrixBaseType), pointer, intent(inout) :: matrix_sln !< A matrix
+    real(DP), dimension(:), intent(inout) :: rhs !< right-hand side
+    integer(I4B), dimension(:), intent(in) :: idxglo !< global index model to solution
+    real(DP), dimension(:), intent(in) :: h_old !< previous heads
+    real(DP), dimension(:), intent(in) :: h_new !< current heads
+    ! local
+    integer(I4B) :: n
+
+    do n = 1, this%sto%dis%nodes
+      if (this%sto%ibound(n) <= 0) cycle
+      ! skip cells claimed by an exclusive formulation
+      if (this%sto%iformulation(n) /= DEFAULT_STORAGE) cycle
+      call this%sto%fn_default_sto(n, matrix_sln, rhs, idxglo, h_old, h_new)
+    end do
+
+  end subroutine default_storage_fn
 
   subroutine fn_default_sto(this, n, matrix_sln, rhs, idxglo, hold, hnew)
     use TdisModule, only: delt
@@ -500,17 +560,71 @@ contains
     integer(I4B) :: n
     integer(I4B) :: iform
     !
-    ! -- Calculate storage change
+    ! -- reset storage rates
     do n = 1, this%dis%nodes
-      iform = this%iformulation(n)
-      if (iform == DEFAULT_STORAGE) then
-        call this%cq_default_sto(n, flowja, hnew, hold)
-      else
-        call this%sto_formulations(iform)%form%cq( &
-          n, flowja, hnew, hold)
+      this%strgss(n) = DZERO
+      this%strgsy(n) = DZERO
+    end do
+    !
+    if (this%iss == 1) return !< no storage for steady state period
+    !
+    ! -- Each active formulation runs over all cells and adds its storage
+    !    change; the default storage formulation is always active.
+    call this%default_form%cq(flowja, hnew, hold)
+    do iform = 1, MAX_EXT_STO_FORMS
+      if (this%sto_formulations(iform)%is_active) then
+        call this%sto_formulations(iform)%form%cq(flowja, hnew, hold)
       end if
     end do
   end subroutine sto_cq
+
+  !> @brief Calculate flows for the default storage formulation
+  !!
+  !! Runs over all cells and stores the standard STO change in storage,
+  !! skipping cells claimed by an exclusive formulation.
+  !<
+  subroutine default_storage_cq(this, flowja, h_new, h_old)
+    class(DefaultStorageFormulationType), intent(inout) :: this !< default formulation
+    real(DP), dimension(:), intent(inout) :: flowja !< connection flows
+    real(DP), dimension(:), intent(in) :: h_new !< current head
+    real(DP), dimension(:), intent(in) :: h_old !< previous head
+    ! local
+    integer(I4B) :: n
+
+    do n = 1, this%sto%dis%nodes
+      if (this%sto%ibound(n) <= 0) cycle
+      ! skip cells claimed by an exclusive formulation
+      if (this%sto%iformulation(n) /= DEFAULT_STORAGE) cycle
+      call this%sto%cq_default_sto(n, flowja, h_new, h_old)
+    end do
+
+  end subroutine default_storage_cq
+
+  !> @brief The default formulation uses the claim mask, not is_active
+  !<
+  function default_storage_is_active(this, n) result(is_active)
+    class(DefaultStorageFormulationType), intent(inout) :: this !< default formulation
+    integer(I4B), intent(in) :: n !< node number
+    logical(LGP) :: is_active !< always false for the default formulation
+    is_active = .false.
+  end function default_storage_is_active
+
+  !> @brief Default storage budget is handled directly by sto_bd
+  !<
+  subroutine default_storage_bd(this, isuppress_output, model_budget)
+    use BudgetModule, only: BudgetType
+    class(DefaultStorageFormulationType), intent(inout) :: this !< default formulation
+    integer(I4B), intent(in) :: isuppress_output !< flag to suppress model output
+    type(BudgetType), intent(inout) :: model_budget !< model budget object
+  end subroutine default_storage_bd
+
+  !> @brief Default storage flows are saved directly by sto_save_model_flows
+  !<
+  subroutine default_storage_save_flows(this, iprint, ibinun)
+    class(DefaultStorageFormulationType), intent(inout) :: this !< default formulation
+    integer(I4B), intent(in) :: iprint !< print flag
+    integer(I4B), intent(in) :: ibinun !< cell-by-cell file unit number
+  end subroutine default_storage_save_flows
 
   !> @brief Standard flow calculation for the storage
   !<
@@ -530,12 +644,6 @@ contains
     real(DP) :: tp, bt
     real(DP) :: snold, snnew
     real(DP) :: aterm, rhsterm
-    !
-    ! -- reset rates
-    this%strgss(n) = DZERO
-    this%strgsy(n) = DZERO
-    if (this%iss == 1) return ! done when steady state
-    if (this%ibound(n) <= 0) return
     !
     tled = DONE / delt
     !
@@ -730,6 +838,13 @@ contains
       call mem_deallocate(this%sy)
       call mem_deallocate(this%strgss)
       call mem_deallocate(this%strgsy)
+      call mem_deallocate(this%iformulation)
+      !
+      ! -- deallocate the default storage formulation
+      if (associated(this%default_form)) then
+        deallocate (this%default_form)
+        this%default_form => null()
+      end if
       !
       ! -- deallocate TVS arrays
       if (associated(this%oldss)) then
@@ -837,6 +952,13 @@ contains
 
       this%iformulation(n) = DEFAULT_STORAGE
     end do
+    !
+    ! -- create the default storage formulation and point it at this package
+    allocate (DefaultStorageFormulationType :: this%default_form)
+    select type (form => this%default_form)
+    type is (DefaultStorageFormulationType)
+      form%sto => this
+    end select
   end subroutine allocate_arrays
 
   !> @ brief Source input options for package

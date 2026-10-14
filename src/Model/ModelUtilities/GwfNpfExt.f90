@@ -1,5 +1,5 @@
 module GwfNpfFormulationModule
-  use KindModule, only: I4B, LGP, DP
+  use KindModule, only: I4B, DP
   use MatrixBaseModule, only: MatrixBaseType
   implicit none
   private
@@ -9,14 +9,18 @@ module GwfNpfFormulationModule
   integer(I4B), public, parameter :: SWI_FLOW = 2
   integer(I4B), public, parameter :: MAX_EXT_FLOW_FORMS = 2
 
+  !> @brief Abstract flow formulation that additively contributes terms
+  !!
+  !! A formulation owns its own traversal of cells/connections and decides,
+  !! per element, whether to add terms. Phases a formulation does not
+  !! implement fall back to a no-op so formulations compose additively.
+  !<
   type, abstract, public :: GwfNpfFormulationType
   contains
-    procedure :: prepare_iteration
-    procedure(is_active_if), deferred :: is_active
-    procedure(cf_if), deferred :: cf
     procedure(fc_if), deferred :: fc
-    procedure(fn_if), deferred :: fn
-    procedure(cq_if), deferred :: cq
+    procedure :: cf => cf_noop
+    procedure :: fn => fn_noop
+    procedure :: cq => cq_noop
   end type GwfNpfFormulationType
 
   !> @brief Container to allow arrays of polymorphic extension pointers
@@ -26,64 +30,45 @@ module GwfNpfFormulationModule
   end type GwfNpfFormContainerType
 
   abstract interface
-    function is_active_if(this, n, m) result(is_active)
-      import GwfNpfFormulationType, I4B, LGP
-      class(GwfNpfFormulationType), intent(inout) :: this
-      integer(I4B), intent(in) :: n
-      integer(I4B), intent(in) :: m
-      logical(LGP) :: is_active
-    end function
-    subroutine cf_if(this, kiter, n)
-      import GwfNpfFormulationType, I4B
+    !> @brief Fill coefficients: formulation loops all connections itself
+    !<
+    subroutine fc_if(this, kiter, matrix_sln, idxglo, rhs, hnew)
+      import GwfNpfFormulationType, MatrixBaseType, I4B, DP
       class(GwfNpfFormulationType), intent(inout) :: this
       integer(I4B), intent(in) :: kiter
-      integer(I4B), intent(in) :: n
-    end subroutine
-    subroutine fc_if(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
-      import GwfNpfFormulationType, MatrixBaseType, I4B, DP
-      class(GwfNpfFormulationType), intent(inout) :: this
-      integer(I4B), intent(in) :: n
-      integer(I4B), intent(in) :: m
-      integer(I4B), intent(in) :: ipos
       class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
-      real(DP), dimension(:), intent(inout) :: rhs
       integer(I4B), dimension(:), intent(in) :: idxglo
-      real(DP), dimension(:), intent(in) :: hnew
-    end subroutine
-    subroutine fn_if(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
-      import GwfNpfFormulationType, MatrixBaseType, I4B, DP
-      class(GwfNpfFormulationType), intent(inout) :: this
-      integer(I4B), intent(in) :: n
-      integer(I4B), intent(in) :: m
-      integer(I4B), intent(in) :: ipos
-      class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
       real(DP), dimension(:), intent(inout) :: rhs
-      integer(I4B), dimension(:), intent(in) :: idxglo
-      real(DP), dimension(:), intent(in) :: hnew
-    end subroutine
-    subroutine cq_if(this, n, m, ipos, flowja, h_new)
-      import GwfNpfFormulationType, I4B, DP
-      class(GwfNpfFormulationType), intent(inout) :: this
-      integer(I4B), intent(in) :: n
-      integer(I4B), intent(in) :: m
-      integer(I4B), intent(in) :: ipos
-      real(DP), dimension(:), intent(inout) :: flowja
-      real(DP), dimension(:), intent(in) :: h_new
+      real(DP), dimension(:), intent(inout) :: hnew
     end subroutine
   end interface
 
 contains
 
-  !> @brief Per-iteration preparation for the formulation (default: no-op).
-  !!
-  !! Called from npf_cf once per outer iteration for every registered
-  !! formulation, before the per-node cf dispatch. Extensions override this to
-  !! refresh iteration-level state computed from the current heads (e.g. the
-  !! NPF flow-reduction interval).
+  !> @brief No-op coefficient calculation; formulation loops cells itself
   !<
-  subroutine prepare_iteration(this, kiter)
+  subroutine cf_noop(this, kiter)
     class(GwfNpfFormulationType), intent(inout) :: this
     integer(I4B), intent(in) :: kiter
-  end subroutine prepare_iteration
+  end subroutine cf_noop
+
+  !> @brief No-op newton terms; formulation loops connections itself
+  !<
+  subroutine fn_noop(this, kiter, matrix_sln, idxglo, rhs, hnew)
+    class(GwfNpfFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: kiter
+    class(MatrixBaseType), pointer, intent(inout) :: matrix_sln
+    integer(I4B), dimension(:), intent(in) :: idxglo
+    real(DP), dimension(:), intent(inout) :: rhs
+    real(DP), dimension(:), intent(inout) :: hnew
+  end subroutine fn_noop
+
+  !> @brief No-op flow calculation; formulation loops connections itself
+  !<
+  subroutine cq_noop(this, hnew, flowja)
+    class(GwfNpfFormulationType), intent(inout) :: this
+    real(DP), dimension(:), intent(inout) :: hnew
+    real(DP), dimension(:), intent(inout) :: flowja
+  end subroutine cq_noop
 
 end module GwfNpfFormulationModule
