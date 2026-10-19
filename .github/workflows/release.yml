@@ -4,8 +4,8 @@ on:
   # from this repo or the nightly build repo for dev builds
   workflow_call:
     inputs:
-      branch:
-        description: 'Branch to release from.'
+      ref:
+        description: 'Branch, tag or commit SHA to release from. Resolved to a SHA once, so every job builds the same commit even if a branch moves during the run.'
         required: true
         type: string
       compiler_toolchain:
@@ -42,17 +42,20 @@ on:
         required: false
         type: boolean
         default: false
-      doi:
-        description: 'DOI link of the release, e.g. https://doi.org/10.5066/P1PGE9XW, for the release history in the release notes. Required for a new minor or major release unless its release history row was already added to the release branch. Patch releases reuse the DOI of the previous release with the same major and minor version.'
-        required: false
-        type: string
-        default: ''
       date:
-        description: 'Date (YYYY-MM-DD) of the release, used for timestamps and the release history so all jobs agree. Defaults to the current date in each job.'
+        description: 'Date (YYYY-MM-DD) of the release, used for timestamps so all jobs agree. Defaults to the current date in each job. Only used when update_version is true.'
         required: false
         type: string
         default: ''
+      update_version:
+        description: 'Apply update_version.py in each job. Set to false when ref is already a commit with version metadata applied (e.g. by a prepare job in the caller workflow), so each job does not need to reapply and recommit it.'
+        required: false
+        type: boolean
+        default: true
     outputs:
+      sha:
+        description: 'Commit SHA the release was built from'
+        value: ${{ jobs.resolve.outputs.sha }}
       version:
         description: 'Version number used for release'
         value: ${{ jobs.build.outputs.version }}
@@ -62,8 +65,33 @@ on:
 env:
   PIXI_BETA_WARNING_OFF: true
 jobs:
+  resolve:
+    name: Resolve commit
+    runs-on: ubuntu-22.04
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      # pin the ref to a SHA up front. build, docs and dist each check out
+      # separately, and docs/dist only start after build and tests finish,
+      # so checking out a branch name in each could pick up different commits
+      - name: Resolve ref to commit SHA
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ inputs.ref }}
+        run: |
+          # required inputs can still be passed an empty string, e.g. from an
+          # expression whose operands are all empty
+          if [[ -z "$REF" ]]; then
+            echo "::error::The ref input is empty. Pass the branch, tag or commit SHA to release from."
+            exit 1
+          fi
+          sha=$(gh api "repos/${{ github.repository_owner }}/modflow6/commits/$REF" --jq .sha)
+          echo "resolved $REF to $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
   build:
     name: Build binaries (${{ matrix.os }}, extended=${{ matrix.extended }})
+    needs: resolve
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -110,7 +138,7 @@ jobs:
         with:
           repository: ${{ github.repository_owner }}/modflow6
           path: modflow6
-          ref: ${{ inputs.branch }}
+          ref: ${{ needs.resolve.outputs.sha }}
 
       - name: Checkout modflow6-testmodels
         if: inputs.run_tests == true && !(runner.os == 'Windows' && matrix.extended)
@@ -135,7 +163,7 @@ jobs:
           version: ${{ matrix.version }}
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.10.2
+        uses: prefix-dev/setup-pixi@v0.11.0
         with:
           pixi-version: v0.80.0
           manifest-path: "modflow6/pixi.toml"
@@ -157,6 +185,7 @@ jobs:
           echo "DISTNAME=$distname" >> "$GITHUB_ENV"
 
       - name: Update version
+        if: inputs.update_version
         id: update_version
         working-directory: modflow6
         env:
@@ -434,7 +463,9 @@ jobs:
 
   docs:
     name: Build docs
-    needs: build
+    needs:
+      - resolve
+      - build
     runs-on: ubuntu-22.04
     defaults:
       run:
@@ -456,7 +487,7 @@ jobs:
         with:
           repository: ${{ github.repository_owner }}/modflow6
           path: modflow6
-          ref: ${{ inputs.branch }}
+          ref: ${{ needs.resolve.outputs.sha }}
 
       - name: Checkout modflow6-examples
         uses: actions/checkout@v7
@@ -484,7 +515,7 @@ jobs:
         run: sudo ./install.sh --all-users
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.10.2
+        uses: prefix-dev/setup-pixi@v0.11.0
         with:
           pixi-version: v0.80.0
           manifest-path: "modflow6/pixi.toml"
@@ -500,6 +531,7 @@ jobs:
           version: ${{ inputs.compiler_version }}
 
       - name: Update version
+        if: inputs.update_version
         id: update_version
         working-directory: modflow6/distribution
         env:
@@ -509,23 +541,6 @@ jobs:
           cmd="pixi run update-version -v $ver"
           if [[ "${{ inputs.releasemode }}" == "true" ]]; then
             cmd="$cmd --releasemode"
-          fi
-          if [[ -n "$DATE" ]]; then
-            cmd="$cmd --date \"\$DATE\""
-          fi
-          eval "$cmd"
-
-      # release notes are built in this job, so it needs the release history row
-      - name: Update release history
-        working-directory: modflow6
-        env:
-          DOI: ${{ inputs.doi }}
-          DATE: ${{ inputs.date }}
-        run: |
-          ver="${{ needs.build.outputs.version }}"
-          cmd="pixi run add-release-history -v $ver"
-          if [[ -n "$DOI" ]]; then
-            cmd="$cmd --doi \"\$DOI\""
           fi
           if [[ -n "$DATE" ]]; then
             cmd="$cmd --date \"\$DATE\""
@@ -625,6 +640,7 @@ jobs:
   dist:
     name: Build distribution (${{ matrix.os }})
     needs:
+      - resolve
       - build
       - docs
     runs-on: ${{ matrix.os }}
@@ -655,7 +671,7 @@ jobs:
         with:
           repository: ${{ github.repository_owner }}/modflow6
           path: modflow6
-          ref: ${{ inputs.branch }}
+          ref: ${{ needs.resolve.outputs.sha }}
 
       - name: Checkout modflow6-examples
         uses: actions/checkout@v7
@@ -670,7 +686,7 @@ jobs:
           version: ${{ matrix.version }}
 
       - name: Setup pixi
-        uses: prefix-dev/setup-pixi@v0.10.2
+        uses: prefix-dev/setup-pixi@v0.11.0
         with:
           pixi-version: v0.80.0
           manifest-path: "modflow6/pixi.toml"
@@ -680,6 +696,7 @@ jobs:
         run: pixi run install
       
       - name: Update version
+        if: inputs.update_version
         id: update_version
         working-directory: modflow6/distribution
         env:
@@ -695,23 +712,6 @@ jobs:
           fi
           eval "$cmd"
 
-      # release notes are built in this job, so it needs the release history row
-      - name: Update release history
-        working-directory: modflow6
-        env:
-          DOI: ${{ inputs.doi }}
-          DATE: ${{ inputs.date }}
-        run: |
-          ver="${{ needs.build.outputs.version }}"
-          cmd="pixi run add-release-history -v $ver"
-          if [[ -n "$DOI" ]]; then
-            cmd="$cmd --doi \"\$DOI\""
-          fi
-          if [[ -n "$DATE" ]]; then
-            cmd="$cmd --date \"\$DATE\""
-          fi
-          eval "$cmd"
- 
       - name: Get OS tag
         working-directory: modflow6
         id: ostag
