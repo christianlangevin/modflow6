@@ -2,11 +2,10 @@ name: MODFLOW 6 release dispatch
 on:
   push:
     branches:
-      # initial phase of the release procedure is triggered by pushing a release branch, for
-      # a patch release (patch version 1-9, then anything) or a release candidate (ending in
-      # rc). A new minor release, vX.Y.0, needs its DOI as input so is started via dispatch.
+      # initial phase of the release procedure is triggered by pushing a release branch for
+      # a patch release (patch version 1-9, then anything). A new minor release, vX.Y.0,
+      # needs its DOI as input so is started via dispatch.
       - v[0-9]+.[0-9]+.[1-9]*
-      - v[0-9]+.[0-9]+.[0-9]+rc*
       # intermediate phase is triggered by merging the release branch to master
       - master
   # final phase is triggered by promoting/publishing a GitHub release draft to a full release
@@ -32,11 +31,6 @@ on:
         required: false
         type: string
         default: '2021.6'
-      releasemode:
-        description: 'Build a full distribution containing sources, examples, and all documentation. If false, the distribution contains only binaries, mf6io, release notes, and code.json, with binaries built in develop mode, and disclaimers & version strings indicating preliminary/provisional status. If true, a full distribution is created, with binaries built in release mode, and disclaimer language indicating review and approval.'
-        required: false
-        type: boolean
-        default: false
       run_tests:
         description: 'Run tests after building binaries.'
         required: false
@@ -178,11 +172,11 @@ jobs:
           VERSION: ${{ steps.set_version.outputs.version }}
           DOI: ${{ inputs.doi }}
         run: |
-          # The release history in the release notes gets a row for the release during the build.
+          # The release history in the release notes gets a row for the release in the prepare job.
           # It reuses the DOI of the previous release with the same major and minor version, so
           # patch releases need no DOI, but a new minor release needs one: either from the doi
           # input, or from a row already on the release branch. Fail now instead of in the build
-          # if there isn't one. Release candidates get no row.
+          # if there isn't one.
           git fetch --depth=1 origin "$BRANCH"
           git show FETCH_HEAD:doc/ReleaseNotes/ReleaseNotes.tex > "$RUNNER_TEMP/ReleaseNotes.tex"
           args=(-v "$VERSION" --check --notes "$RUNNER_TEMP/ReleaseNotes.tex")
@@ -194,48 +188,23 @@ jobs:
             echo "for $VERSION to the release history in doc/ReleaseNotes/ReleaseNotes.tex on $BRANCH."
             exit 1
           fi
-  make_dist:
-    name: Make distribution
-    uses: MODFLOW-ORG/modflow6/.github/workflows/release.yml@develop
+  prepare:
+    name: Prepare release
     needs: set_options
-    with:
-      # If the workflow is manually triggered, the maintainer must manually set approve=true to approve a release.
-      # If triggered by pushing a release branch, the release is approved if the branch name doesn't contain "rc".
-      compiler_toolchain: ${{ needs.set_options.outputs.compiler_toolchain }}
-      compiler_version: ${{ needs.set_options.outputs.compiler_version }}
-      branch: ${{ needs.set_options.outputs.branch }}
-      # If the workflow is manually triggered, the maintainer must manually set releasemode to true, otherwise the default is false.
-      # If triggered by pushing a release branch, the release is developmode if the branch name contains "rc", otherwise releasemode.
-      releasemode: ${{ (github.event_name == 'workflow_dispatch' && inputs.releasemode == true) || github.event_name != 'workflow_dispatch' }}
-      # If the workflow is manually triggered, the maintainer must manually set run_tests to false, otherwise the default is true.
-      # If triggered by pushing a release branch, tests are enabled.
-      run_tests: ${{ (github.event_name == 'workflow_dispatch' && inputs.run_tests == true) || github.event_name != 'workflow_dispatch' }}
-      version: ${{ needs.set_options.outputs.version }}
-      patch: ${{ (github.event_name == 'workflow_dispatch' && inputs.patch == true) || (github.event_name != 'workflow_dispatch' && needs.set_options.outputs.patch == 'true') }}
-      # If triggered by pushing a release branch there is no input. A patch release reuses the previous DOI,
-      # and for a new minor release the release history row must already be on the branch.
-      doi: ${{ inputs.doi }}
-      # the same date for all jobs, so timestamps and the release history agree
-      date: ${{ needs.set_options.outputs.date }}
-  pr:
-    name: Draft release PR
-    if: ${{ github.ref_name != 'master' && ((github.event_name == 'workflow_dispatch' && inputs.releasemode == true) || (github.event_name != 'workflow_dispatch' && !contains(github.ref_name, 'rc'))) }}
-    needs:
-      - set_options
-      - make_dist
     runs-on: ubuntu-22.04
     permissions:
       contents: write
-      pull-requests: write
     defaults:
       run:
         shell: bash -l {0}
+    outputs:
+      sha: ${{ steps.prepare.outputs.sha }}
     steps:
       - name: Checkout modflow6
         uses: actions/checkout@v7
         with:
           repository: ${{ github.repository_owner }}/modflow6
-          ref: ${{ github.ref }}
+          ref: ${{ needs.set_options.outputs.branch }}
 
       - name: Setup Micromamba
         uses: mamba-org/setup-micromamba@v3
@@ -244,25 +213,27 @@ jobs:
           cache-downloads: true
           cache-environment: true
 
-      - name: Update version
+      - name: Update version and release history
+        id: prepare
         working-directory: distribution
         env:
           # empty if workflow was triggered by pushing a release branch
           DOI: ${{ inputs.doi }}
           DATE: ${{ needs.set_options.outputs.date }}
         run: |
-          # update version files
           ver="${{ needs.set_options.outputs.version }}"
-          args=(-v "$ver" --date "$DATE")
-          # approve will be empty if workflow was triggered by pushing a release branch
-          # todo: pull approve into set_options job/output?
-          if [[ ("${{ inputs.releasemode }}" == "true") || ("${{ inputs.releasemode }}" == "") ]]; then
-            args+=(--releasemode)
-          fi
-          python update_version.py "${args[@]}"
 
-          # add the release to the release history, using the DOI if provided
-          args=(-v "$ver" --date "$DATE")
+          # always this run's date, even when retrying a previously prepared release:
+          # a retry is a new build, so it's dated by that build everywhere. A retry on
+          # the same day regenerates the same files, so no new commit is made below
+
+          # update version files
+          python update_version.py -v "$ver" --date "$DATE" --releasemode
+
+          # add the release to the release history, using the DOI if provided. If a
+          # row already exists (a retry, or added by hand), update its date and keep
+          # its DOI, so the history and citation agree with the timestamps
+          args=(-v "$ver" --date "$DATE" --update-date)
           if [[ -n "$DOI" ]]; then
             args+=(--doi "$DOI")
           fi
@@ -270,28 +241,75 @@ jobs:
 
           # lint version.f90
           fprettify -c ../.fprettify.yaml ../src/Utilities/version.f90
-          
-          # commit and push
+
           git config core.sharedRepository true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "ci(release): update version to $ver"
-          git push origin "${{ github.ref }}"
 
+          # doc/version.py always changes (it embeds the exact run time, down to
+          # the second, in a comment), so ignore it when deciding whether there's
+          # anything real to commit
+          if git diff --cached --quiet -- . ':(exclude)doc/version.py'; then
+            echo "no real changes since the last prepare commit for $ver, reusing it"
+          else
+            git commit -m "ci(release): update version to $ver"
+            git push origin "HEAD:refs/heads/${{ needs.set_options.outputs.branch }}"
+          fi
+
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  make_dist:
+    name: Make distribution
+    uses: MODFLOW-ORG/modflow6/.github/workflows/release.yml@develop
+    needs:
+      - set_options
+      - prepare
+    with:
+      compiler_toolchain: ${{ needs.set_options.outputs.compiler_toolchain }}
+      compiler_version: ${{ needs.set_options.outputs.compiler_version }}
+      # the commit prepare made, so every job builds what merges to master
+      ref: ${{ needs.prepare.outputs.sha }}
+      releasemode: true
+      # If the workflow is manually triggered, the maintainer must manually set run_tests to false, otherwise the default is true.
+      # If triggered by pushing a release branch, tests are enabled.
+      run_tests: ${{ (github.event_name == 'workflow_dispatch' && inputs.run_tests == true) || github.event_name != 'workflow_dispatch' }}
+      version: ${{ needs.set_options.outputs.version }}
+      patch: ${{ (github.event_name == 'workflow_dispatch' && inputs.patch == true) || (github.event_name != 'workflow_dispatch' && needs.set_options.outputs.patch == 'true') }}
+      # prepare already committed the version metadata
+      update_version: false
+  pr:
+    name: Draft release PR
+    needs:
+      - set_options
+      - make_dist
+    runs-on: ubuntu-22.04
+    permissions:
+      pull-requests: write
+    steps:
       - name: Create pull request
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          BRANCH: ${{ needs.set_options.outputs.branch }}
         run: |
           ver="${{ needs.set_options.outputs.version }}"
+
+          # a rerun after the release PR was opened (e.g. to rebuild after pushing a
+          # fix to the release branch) updates that PR's branch, so don't open another
+          existing=$(gh pr list -R "${{ github.repository }}" -B master -H "$BRANCH" --state open --json url --jq '.[0].url // empty')
+          if [[ -n "$existing" ]]; then
+            echo "release PR already exists for $BRANCH: $existing"
+            exit 0
+          fi
+
           body='
           # MODFLOW '$ver' release
-          
+
           The release can be approved by merging this PR into `master`. Merging rather than squashing is necessary to preserve the commit history.
-          
+
           When this PR is merged, a final job will be triggered to draft a tagged GitHub release, then upload assets (OS distributions and release notes).
           '
-          gh pr create -B "master" -H "${{ github.ref }}" --title "Release $ver" --draft --body "$body"
+          gh pr create -B "master" -H "$BRANCH" -R "${{ github.repository }}" --title "Release $ver" --draft --body "$body"
 
   release:
     name: Draft release

@@ -349,19 +349,19 @@ contains
     case ('GHB')
       !
       ! -- general head boundary
-      call buy_cf_ghb(packobj, hnew, this%dense, this%elev, this%denseref, &
+      call buy_cf_ghb(packobj, this%dense, this%elev, this%denseref, &
                       locelev, locdense, locconc, this%drhodc, this%crhoref, &
-                      this%ctemp, this%iform)
+                      this%ctemp)
     case ('RIV')
       !
       ! -- river
       call buy_cf_riv(packobj, hnew, this%dense, this%elev, this%denseref, &
                       locelev, locdense, locconc, this%drhodc, this%crhoref, &
-                      this%ctemp, this%iform)
+                      this%ctemp)
     case ('DRN')
       !
       ! -- drain
-      call buy_cf_drn(packobj, hnew, this%dense, this%denseref)
+      call buy_cf_drn(packobj, this%dense, this%denseref)
     case ('LAK')
       !
       ! -- lake
@@ -432,15 +432,13 @@ contains
 
   !> @brief Fill ghb coefficients
   !<
-  subroutine buy_cf_ghb(packobj, hnew, dense, elev, denseref, locelev, &
-                        locdense, locconc, drhodc, crhoref, ctemp, &
-                        iform)
+  subroutine buy_cf_ghb(packobj, dense, elev, denseref, locelev, &
+                        locdense, locconc, drhodc, crhoref, ctemp)
     ! -- modules
     use BndModule, only: BndType
     use GhbModule, only: GhbType
     class(BndType), pointer :: packobj
     ! -- dummy
-    real(DP), intent(in), dimension(:) :: hnew
     real(DP), intent(in), dimension(:) :: dense
     real(DP), intent(in), dimension(:) :: elev
     real(DP), intent(in) :: denseref
@@ -450,7 +448,6 @@ contains
     real(DP), dimension(:), intent(in) :: drhodc
     real(DP), dimension(:), intent(in) :: crhoref
     real(DP), dimension(:), intent(inout) :: ctemp
-    integer(I4B), intent(in) :: iform
     ! -- local
     integer(I4B) :: n
     integer(I4B) :: node
@@ -477,12 +474,12 @@ contains
         !
         ! -- boundary head and conductance
         hghb = packobj%bhead(n)
-        cond = packobj%cond(n)
+        cond = packobj%cond_mult(n)
         !
         ! -- calculate HCOF and RHS terms
         call calc_ghb_hcof_rhs_terms(denseref, denseghb, dense(node), &
-                                     elevghb, elev(node), hghb, hnew(node), &
-                                     cond, iform, rhsterm, hcofterm)
+                                     elevghb, elev(node), hghb, cond, &
+                                     rhsterm, hcofterm)
         packobj%hcof(n) = packobj%hcof(n) + hcofterm
         packobj%rhs(n) = packobj%rhs(n) - rhsterm
         !
@@ -491,10 +488,15 @@ contains
   end subroutine buy_cf_ghb
 
   !> @brief Calculate density hcof and rhs terms for ghb conditions
+  !!
+  !! These terms only affect the diagonal and cannot make the matrix
+  !! asymmetric, so they are added to the matrix for both hydraulic head
+  !! formulations. Lagging them on the right-hand side for HHFORMULATION_RHS
+  !! caused outer iterations to cycle when a RIV switched across rbot.
   !<
   subroutine calc_ghb_hcof_rhs_terms(denseref, denseghb, densenode, &
-                                     elevghb, elevnode, hghb, hnode, &
-                                     cond, iform, rhsterm, hcofterm)
+                                     elevghb, elevnode, hghb, &
+                                     cond, rhsterm, hcofterm)
     ! -- dummy
     real(DP), intent(in) :: denseref
     real(DP), intent(in) :: denseghb
@@ -502,9 +504,7 @@ contains
     real(DP), intent(in) :: elevghb
     real(DP), intent(in) :: elevnode
     real(DP), intent(in) :: hghb
-    real(DP), intent(in) :: hnode
     real(DP), intent(in) :: cond
-    integer(I4B), intent(in) :: iform
     real(DP), intent(inout) :: rhsterm
     real(DP), intent(inout) :: hcofterm
     ! -- local
@@ -519,28 +519,18 @@ contains
     !
     ! -- Add hcof terms
     hcofterm = -cond * t1
-    if (iform == 2) then
-      !
-      ! -- this term goes on RHS for iform == 1
-      hcofterm = hcofterm + DHALF * cond * t2
-    end if
+    hcofterm = hcofterm + DHALF * cond * t2
     !
     ! -- Add rhs terms
     rhsterm = cond * t1 * hghb
     rhsterm = rhsterm - cond * t2 * avgelev
     rhsterm = rhsterm + DHALF * cond * t2 * hghb
-    if (iform == 1) then
-      !
-      ! -- this term goes on LHS for iform == 2
-      rhsterm = rhsterm + DHALF * cond * t2 * hnode
-    end if
   end subroutine calc_ghb_hcof_rhs_terms
 
   !> @brief Fill riv coefficients
   !<
   subroutine buy_cf_riv(packobj, hnew, dense, elev, denseref, locelev, &
-                        locdense, locconc, drhodc, crhoref, ctemp, &
-                        iform)
+                        locdense, locconc, drhodc, crhoref, ctemp)
     ! -- modules
     use BndModule, only: BndType
     use RivModule, only: RivType
@@ -556,7 +546,6 @@ contains
     real(DP), dimension(:), intent(in) :: drhodc
     real(DP), dimension(:), intent(in) :: crhoref
     real(DP), dimension(:), intent(inout) :: ctemp
-    integer(I4B), intent(in) :: iform
     ! -- local
     integer(I4B) :: n
     integer(I4B) :: node
@@ -585,7 +574,7 @@ contains
         !
         ! -- boundary head and conductance
         hriv = packobj%stage(n)
-        cond = packobj%cond(n)
+        cond = packobj%cond_mult(n)
         rbot = packobj%rbot(n)
         !
         ! -- calculate and add terms depending on whether head is above rbot
@@ -593,8 +582,8 @@ contains
           !
           ! --calculate HCOF and RHS terms, similar to GHB in this case
           call calc_ghb_hcof_rhs_terms(denseref, denseriv, dense(node), &
-                                       elevriv, elev(node), hriv, hnew(node), &
-                                       cond, iform, rhsterm, hcofterm)
+                                       elevriv, elev(node), hriv, cond, &
+                                       rhsterm, hcofterm)
         else
           hcofterm = DZERO
           rhsterm = cond * (denseriv / denseref - DONE) * (hriv - rbot)
@@ -609,23 +598,18 @@ contains
 
   !> @brief Fill drn coefficients
   !<
-  subroutine buy_cf_drn(packobj, hnew, dense, denseref)
+  subroutine buy_cf_drn(packobj, dense, denseref)
     ! -- modules
     use BndModule, only: BndType
     use DrnModule, only: DrnType
     class(BndType), pointer :: packobj
     ! -- dummy
-    real(DP), intent(in), dimension(:) :: hnew
     real(DP), intent(in), dimension(:) :: dense
     real(DP), intent(in) :: denseref
     ! -- local
     integer(I4B) :: n
     integer(I4B) :: node
     real(DP) :: rho
-    real(DP) :: hbnd
-    real(DP) :: cond
-    real(DP) :: hcofterm
-    real(DP) :: rhsterm
     !
     ! -- Process density terms for each DRN
     select type (packobj)
@@ -633,15 +617,14 @@ contains
       do n = 1, packobj%nbound
         node = packobj%nodelist(n)
         if (packobj%ibound(node) <= 0) cycle
-        rho = dense(node)
-        hbnd = packobj%elev(n)
-        cond = packobj%cond(n)
-        if (hnew(node) > hbnd) then
-          hcofterm = -cond * (rho / denseref - DONE)
-          rhsterm = hcofterm * hbnd
-          packobj%hcof(n) = packobj%hcof(n) + hcofterm
-          packobj%rhs(n) = packobj%rhs(n) + rhsterm
-        end if
+        ! -- DRN uses the density of the discharging water. Scale the
+        !    assembled coefficients so AUXMULTNAME, AUXDEPTHNAME, and the
+        !    corresponding discharge elevation apply to the entire flux.
+        !    The Newton term for AUXDEPTHNAME in drn_fn is not scaled, so
+        !    the Jacobian is approximate, as for the other density terms.
+        rho = dense(node) / denseref
+        packobj%hcof(n) = rho * packobj%hcof(n)
+        packobj%rhs(n) = rho * packobj%rhs(n)
       end do
     end select
   end subroutine buy_cf_drn
