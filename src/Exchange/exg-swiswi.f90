@@ -335,6 +335,21 @@ contains
     ! dummy
     class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
 
+    ! The interface elevation is computed from both heads using coefficients
+    ! derived from the relative density difference. The two models must
+    ! therefore agree on it, or each would place the interface differently and
+    ! the coupling would be inconsistent without any outward sign of trouble.
+    if (this%gwf_fresh%swi%reldensdiff /= this%gwf_salt%swi%reldensdiff) then
+      write (errmsg, '(a,a,a,G0,a,a,a,G0,a)') &
+        'RELATIVE_DENSITY_DIFFERENCE must be the same in both models of a &
+        &two-fluid simulation. Model ', trim(this%gwf_fresh%name), &
+        ' specified ', this%gwf_fresh%swi%reldensdiff, &
+        ' and model ', trim(this%gwf_salt%name), &
+        ' specified ', this%gwf_salt%swi%reldensdiff, '.'
+      call store_error(errmsg, terminate=.false.)
+      call store_error_filename(this%filename)
+    end if
+
     ! Set head pointers for fresh and salt model swi packages.
     call this%gwf_fresh%swi%set_head_pointers(this%gwf_fresh%x, &
                                               this%gwf_salt%x, &
