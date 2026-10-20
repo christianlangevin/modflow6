@@ -645,11 +645,6 @@ contains
 
   end subroutine log_options
 
-  !> @brief Set this model configuration.
-  !! This can be called from an exchange, such as the
-  !! SwiSwi exchange, which knows which model/swi package
-  !! is the saltwater model.
-  !<
   !> @brief Set the interface coefficients from the relative density difference
   !!
   !! alphaf = rhof / (rhos - rhof) = 1 / reldensdiff, and alphas = alphaf + 1.
@@ -669,6 +664,11 @@ contains
 
   end subroutine set_alphas
 
+  !> @brief Set this model configuration.
+  !! This can be called from an exchange, such as the
+  !! SwiSwi exchange, which knows which model/swi package
+  !! is the saltwater model.
+  !<
   subroutine set_configuration(this, config)
     ! dummy
     class(GwfSwiType) :: this
