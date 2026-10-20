@@ -93,3 +93,12 @@ longname saltwater head
 description specified saltwater head value.  This saltwater head value will be assigned as the saltwater head used by the SWI Package. During solution of the freshwater flow equation the specified saltwater head will remain fixed.  A common use case for providing saltwater head is to set it equal to sea level, provided that sea level is not zero and does not change with time.  If not specified, and the TVA input option is not specified, then the default value for saltwater head is zero.  If the saltwater head option is specified and TVA input is also provided, then the TVA input will override the saltwater head option.
 mf6internal hsalt_user
 
+block options
+name relative_density_difference
+type double precision
+reader urword
+optional true
+longname relative density difference
+description dimensionless density difference between saltwater and freshwater, calculated as the saltwater density minus the freshwater density, divided by the freshwater density.  The value must be greater than zero.  If not specified, the default value is 0.025, which corresponds to a freshwater density of 1000. and a saltwater density of 1025.  The SWI Package uses this single dimensionless value instead of two densities because the interface position depends only on their ratio.  For a two-fluid simulation the same value must be specified for the freshwater model and the saltwater model; the SWI-SWI Exchange terminates with an error if the two differ.
+mf6internal reldensdiff
+

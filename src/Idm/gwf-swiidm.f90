@@ -22,6 +22,7 @@ module GwfSwiInputModule
     logical :: filein = .false.
     logical :: tva6_filename = .false.
     logical :: hsalt_user = .false.
+    logical :: reldensdiff = .false.
   end type GwfSwiParamFoundType
 
   logical :: gwf_swi_multi_package = .false.
@@ -205,6 +206,25 @@ module GwfSwiInputModule
     )
 
   type(InputParamDefinitionType), parameter :: &
+    gwfswi_reldensdiff = InputParamDefinitionType &
+    ( &
+    'GWF', & ! component
+    'SWI', & ! subcomponent
+    'OPTIONS', & ! block
+    'RELATIVE_DENSITY_DIFFERENCE', & ! tag name
+    'RELDENSDIFF', & ! fortran variable
+    'DOUBLE', & ! type
+    '', & ! shape
+    'relative density difference', & ! longname
+    .false., & ! required
+    .false., & ! developmode
+    .false., & ! multi-record
+    .false., & ! preserve case
+    .false., & ! layered
+    .false. & ! timeseries
+    )
+
+  type(InputParamDefinitionType), parameter :: &
     gwf_swi_param_definitions(*) = &
     [ &
     gwfswi_zeta_filerecord, &
@@ -215,7 +235,8 @@ module GwfSwiInputModule
     gwfswi_tva6, &
     gwfswi_filein, &
     gwfswi_tva6_filename, &
-    gwfswi_hsalt_user &
+    gwfswi_hsalt_user, &
+    gwfswi_reldensdiff &
     ]
 
   type(InputParamDefinitionType), parameter :: &

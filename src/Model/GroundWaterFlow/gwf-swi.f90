@@ -31,6 +31,7 @@ module GwfSwiModule
   integer(I4B), parameter :: FRESHWATER_TWO_FLUID = 1 !< freshwater model with swi-swi exchange
   integer(I4B), parameter :: SALTWATER_ONE_FLUID = 2 !< saltwater model without swi-swi exchange, not supported
   integer(I4B), parameter :: SALTWATER_TWO_FLUID = 3 !< saltwater model with swi-swi exchange
+  real(DP), parameter :: DEFAULT_RELDENSDIFF = 0.025D0 !< default relative density difference, (rhos - rhof) / rhof, for 1000. and 1025.
   real(DP), parameter :: ZONE_MINIMUM_THICKNESS = 1.d-3 !< minimum thickness of saltwater or freshwater zone to avoid numerical issues
 
   type, extends(NumericalPackageType) :: GwfSwiType
@@ -48,7 +49,8 @@ module GwfSwiModule
     real(DP), dimension(:), pointer, contiguous :: storage => null() !< calculated swi storage
 
     ! information needed for full implementation
-    real(DP), pointer :: alphaf => null() !< rhof / (rhos - rhof), default is 40
+    real(DP), pointer :: reldensdiff => null() !< relative density difference, (rhos - rhof) / rhof; user input, default 0.025
+    real(DP), pointer :: alphaf => null() !< rhof / (rhos - rhof), derived from reldensdiff, default is 40
     real(DP), pointer :: alphas => null() !< rhos / (rhos - rhof), default is 41
     real(DP), pointer :: hsalt_user => null() !< user specified head of saltwater (zero by default)
     real(DP), dimension(:), pointer, contiguous :: hfresh => null() !< head of freshwater
@@ -84,6 +86,7 @@ module GwfSwiModule
     procedure, private :: swi_load
     procedure, private :: source_options
     procedure, private :: log_options
+    procedure, private :: set_alphas
     procedure :: allocate_scalars
     procedure, private :: allocate_arrays
     procedure, private :: update_zeta
@@ -456,6 +459,7 @@ contains
     call mem_deallocate(this%isaltwater)
     call mem_deallocate(this%izetaout)
     call mem_deallocate(this%intva)
+    call mem_deallocate(this%reldensdiff)
     call mem_deallocate(this%alphaf)
     call mem_deallocate(this%alphas)
     call mem_deallocate(this%hsalt_user)
@@ -502,13 +506,14 @@ contains
     call mem_allocate(this%intva, 'INTVA', this%memoryPath)
     call mem_allocate(this%alphaf, 'ALPHAF', this%memoryPath)
     call mem_allocate(this%alphas, 'ALPHAS', this%memoryPath)
+    call mem_allocate(this%reldensdiff, 'RELDENSDIFF', this%memoryPath)
     call mem_allocate(this%hsalt_user, 'HSALT_USER', this%memoryPath)
 
     ! Initialize value
     this%izetaout = 0
     this%intva = 0
-    this%alphaf = 40.D0
-    this%alphas = 41.D0
+    this%reldensdiff = DEFAULT_RELDENSDIFF
+    call this%set_alphas()
     this%hsalt_user = DZERO
 
     ! initialize iconfiguration and isaltwater
@@ -567,6 +572,20 @@ contains
                        found%zetafile)
     call mem_set_value(this%hsalt_user, 'HSALT_USER', this%input_mempath, &
                        found%hsalt_user)
+    call mem_set_value(this%reldensdiff, 'RELDENSDIFF', this%input_mempath, &
+                       found%reldensdiff)
+
+    ! the interface coefficients follow from the relative density difference
+    if (found%reldensdiff) then
+      if (this%reldensdiff <= DZERO) then
+        write (errmsg, '(a,G0,a)') &
+          'RELATIVE_DENSITY_DIFFERENCE must be greater than zero. Value &
+          &specified is ', this%reldensdiff, '.'
+        call store_error(errmsg, terminate=.false.)
+        call store_error_filename(this%input_fname)
+      end if
+      call this%set_alphas()
+    end if
 
     ! open zeta file
     if (zeta_fname /= '') then
@@ -614,6 +633,10 @@ contains
       write (this%iout, '(4x,a,G0,a)') &
         'Saltwater head was set to ', this%hsalt_user, '.'
     end if
+    if (found%reldensdiff) then
+      write (this%iout, '(4x,a,G0,a)') &
+        'Relative density difference was set to ', this%reldensdiff, '.'
+    end if
     if (found%tva6_filename) then
       write (this%iout, '(4x,a)') &
         'Saltwater head will be read from file.'
@@ -621,6 +644,25 @@ contains
     write (this%iout, '(1x,a,/)') 'End Setting SWI Options'
 
   end subroutine log_options
+
+  !> @brief Set the interface coefficients from the relative density difference
+  !!
+  !! alphaf = rhof / (rhos - rhof) = 1 / reldensdiff, and alphas = alphaf + 1.
+  !! The two differ by exactly one, so the formulation has a single degree of
+  !! freedom and the relative density difference is the only density input
+  !! needed. The guard keeps a non-positive user value, which is reported as an
+  !! input error, from dividing by zero before the run terminates.
+  !<
+  subroutine set_alphas(this)
+    ! dummy
+    class(GwfSwiType) :: this
+
+    if (this%reldensdiff > DZERO) then
+      this%alphaf = DONE / this%reldensdiff
+      this%alphas = this%alphaf + DONE
+    end if
+
+  end subroutine set_alphas
 
   !> @brief Set this model configuration.
   !! This can be called from an exchange, such as the
