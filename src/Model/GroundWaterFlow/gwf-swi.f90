@@ -3,7 +3,7 @@ module GwfSwiModule
   use KindModule, only: DP, I4B, LGP
   use ConstantsModule, only: LINELENGTH, DONE, DZERO, DHALF, LENBUDTXT, &
                              MNORMAL, DHNOFLO, C3D_VERTICAL, LENMODELNAME, &
-                             DEM6, DEM12
+                             DEM6, DEM12, LENMEMPATH
   use SimVariablesModule, only: errmsg
   use SimModule, only: store_error, store_error_filename
   use NumericalPackageModule, only: NumericalPackageType
@@ -16,7 +16,7 @@ module GwfSwiModule
   use MemoryHelperModule, only: create_mem_path
   use MatrixBaseModule
   use GwfConductanceUtilsModule, only: hcond, vcond
-  use UtlTvaModule, only: UtlTvaType
+  use UtlTvgModule, only: UtlTvgType
   use GwfNpfFormulationModule, only: GwfNpfFormulationType, SWI_FLOW
   use GwfStoExtModule, only: GwfStoFormulationType, SWI_STORAGE
 
@@ -42,7 +42,8 @@ module GwfSwiModule
     integer(I4B), pointer :: iconfiguration => null() !< 0 is freshwater, 1 is freshwater two fluid, 2 is saltwater, 3 is saltwater two fluid
     integer(I4B), pointer :: isaltwater => null() !< 0 is freshwater, 1 is saltwater
     integer(I4B), pointer :: izetaout => null() !< unit number for binary zeta output file
-    integer(I4B), pointer :: intva => null() !< unit number for reading hsalt
+    integer(I4B), pointer :: intvg => null() !< flag: a TVG6 file supplies hsalt
+    character(len=LENMEMPATH) :: tvg6_mempath = '' !< input memory path of the TVG subpackage
     real(DP), dimension(:), pointer, contiguous :: zeta => null() !< starting zeta
     real(DP), dimension(:), pointer, contiguous :: hcof => null() !< hcof contribution to amat
     real(DP), dimension(:), pointer, contiguous :: rhs => null() !< rhs contribution
@@ -67,7 +68,7 @@ module GwfSwiModule
     real(DP), dimension(:), pointer, contiguous :: oldss => null() !< pointer to storage package specific yield
 
     ! objects
-    type(UtlTvaType) :: tva_reader
+    type(UtlTvgType) :: tvg_reader
 
     ! SWI flow formulation (overrides the default NPF conductance)
     class(GwfNpfFormulationType), pointer :: npf_form => null()
@@ -189,15 +190,14 @@ contains
     ! load from IDM
     call this%swi_load()
 
-    ! setup the tva reader
-    if (this%intva > 0) then
-      call this%tva_reader%initialize(this%dis, this%dis%nodesuser, &
-                                      this%intva, this%iout, &
+    ! setup the tvg reader
+    if (this%intvg > 0) then
+      call this%tvg_reader%initialize(this%dis, this%tvg6_mempath, this%iout, &
                                       this%name_model, 'SWI')
-      if (.not. this%tva_reader%has('SALTWATER_HEAD')) then
-        write (errmsg, '(a)') 'TVA Input file does not have SALTWATER_HEAD &
-          &variable.  Specify SALTWATER_HEAD as a time variable input array in &
-          &the TVA input file.'
+      if (.not. this%tvg_reader%has('SALTWATER_HEAD')) then
+        write (errmsg, '(a)') 'TVG Input file does not have SALTWATER_HEAD &
+          &variable.  Specify SALTWATER_HEAD as a time varying grid array in &
+          &the TVG input file.'
         call store_error(errmsg, terminate=.false.)
         call store_error_filename(this%input_fname)
       end if
@@ -324,10 +324,6 @@ contains
     class(GwfSwiType) :: this
     ! local
 
-    if (this%intva > 0) then
-      call this%tva_reader%tva_rp()
-    end if
-
   end subroutine swi_rp
 
   !> @brief Advance
@@ -353,11 +349,11 @@ contains
       end if
     end if
 
-    ! if time array series used, then update hsalt with new values
-    if (this%intva > 0) then
-      call this%tva_reader%tva_ad()
+    ! the Input Data Model has loaded this period's arrays; copy the
+    ! saltwater head into the package's own array
+    if (this%intvg > 0) then
       if (this%iconfiguration == FRESHWATER_ONE_FLUID) then
-        call this%tva_reader%fill(this%hsalt, 'SALTWATER_HEAD')
+        call this%tvg_reader%fill(this%hsalt, 'SALTWATER_HEAD')
       end if
     end if
 
@@ -439,8 +435,8 @@ contains
     ! deallocate IDM memory
     call memorystore_remove(this%name_model, 'SWI', idm_context)
 
-    if (this%intva > 0) then
-      call this%tva_reader%tva_da()
+    if (this%intvg > 0) then
+      call this%tvg_reader%tvg_da()
     end if
 
     ! deallocate arrays
@@ -458,7 +454,7 @@ contains
     call mem_deallocate(this%iconfiguration)
     call mem_deallocate(this%isaltwater)
     call mem_deallocate(this%izetaout)
-    call mem_deallocate(this%intva)
+    call mem_deallocate(this%intvg)
     call mem_deallocate(this%reldensdiff)
     call mem_deallocate(this%alphaf)
     call mem_deallocate(this%alphas)
@@ -503,7 +499,7 @@ contains
     call mem_allocate(this%iconfiguration, 'ICONFIGURATION', this%memoryPath)
     call mem_allocate(this%isaltwater, 'ISALTWATER', this%memoryPath)
     call mem_allocate(this%izetaout, 'IZETAOUT', this%memoryPath)
-    call mem_allocate(this%intva, 'INTVA', this%memoryPath)
+    call mem_allocate(this%intvg, 'INTVG', this%memoryPath)
     call mem_allocate(this%alphaf, 'ALPHAF', this%memoryPath)
     call mem_allocate(this%alphas, 'ALPHAS', this%memoryPath)
     call mem_allocate(this%reldensdiff, 'RELDENSDIFF', this%memoryPath)
@@ -511,7 +507,7 @@ contains
 
     ! Initialize value
     this%izetaout = 0
-    this%intva = 0
+    this%intvg = 0
     this%reldensdiff = DEFAULT_RELDENSDIFF
     call this%set_alphas()
     this%hsalt_user = DZERO
@@ -562,7 +558,8 @@ contains
     ! dummy
     class(GwfSwiType) :: this
     character(len=LINELENGTH) :: zeta_fname
-    character(len=LINELENGTH) :: tva_fname
+    character(len=LINELENGTH) :: tvg_fname
+    type(CharacterStringType), dimension(:), pointer, contiguous :: tvg6_mempaths
     ! locals
     type(GwfSwiParamFoundType) :: found
 
@@ -597,13 +594,16 @@ contains
     end if
 
     ! open hsalt file
-    tva_fname = ''
-    if (filein_fname(tva_fname, 'TVA6_FILENAME', this%input_mempath, &
+    ! TVG6 subpackage. The Input Data Model loads the file and records its
+    ! memory path here; the reader is attached to that path in swi_ar.
+    tvg_fname = ''
+    if (filein_fname(tvg_fname, 'TVG6_FILENAME', this%input_mempath, &
                      this%input_fname)) then
-      this%intva = getunit()
-      call openfile(this%intva, this%iout, tva_fname, 'TVA6')
-      write (this%iout, '(4x,a)') &
-        'Time variable array information will be read from ', trim(tva_fname)
+      call mem_setptr(tvg6_mempaths, 'TVG6_MEMPATH', this%input_mempath)
+      this%tvg6_mempath = tvg6_mempaths(1)
+      this%intvg = 1
+      write (this%iout, '(4x,a,a)') &
+        'Time varying grid array information will be read from ', trim(tvg_fname)
     end if
 
     ! log options
@@ -637,7 +637,7 @@ contains
       write (this%iout, '(4x,a,G0,a)') &
         'Relative density difference was set to ', this%reldensdiff, '.'
     end if
-    if (found%tva6_filename) then
+    if (found%tvg6_filename) then
       write (this%iout, '(4x,a)') &
         'Saltwater head will be read from file.'
     end if

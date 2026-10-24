@@ -92,16 +92,16 @@ def build_models(idx, test):
     swi = flopy.mf6.ModflowGwfswi(
         gwf,
         zeta_filerecord=zeta_file,
-        tva6_filerecord=f"{name}.swi.tva",
+        tvg6_filerecord=f"{name}.swi.tvg",
     )
 
-    # initialize the tva subpackage with the saltwater head
+    # initialize the tvg subpackage with the saltwater head
     sl = np.linspace(sealevel_start, sealevel_stop, nper)
     aux = {}
     for kper in range(nper):
         # this list has 2 entries, one for hsalt and one for myauxvar
         aux[kper] = [sl[kper], np.ones((nlay, nrow, ncol))]
-    swi.tva.initialize(auxiliary=["saltwater_head", "myauxvar"], aux=aux)
+    swi.tvg.initialize(auxiliary=["saltwater_head", "myauxvar"], aux=aux)
 
     cghb = hydraulic_conductivity * ghb_cond_fact * delr * delc / 1
     ghbspd = {}
