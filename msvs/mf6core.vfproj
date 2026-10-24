@@ -294,6 +294,7 @@
 				<File RelativePath="..\src\Idm\utl-sfrtabidm.f90"/>
 				<File RelativePath="..\src\Idm\utl-spcaidm.f90"/>
 				<File RelativePath="..\src\Idm\utl-spcidm.f90"/>
+				<File RelativePath="..\src\Idm\utl-tvgidm.f90"/>
 				<File RelativePath="..\src\Idm\utl-tvkidm.f90"/>
 				<File RelativePath="..\src\Idm\utl-tvsidm.f90"/>
 			</Filter>
@@ -429,6 +430,7 @@
 					<File RelativePath="..\src\Model\ModelUtilities\TimeStepSelect.f90"/>
 					<File RelativePath="..\src\Model\ModelUtilities\TspAdvOptions.f90"/>
 					<File RelativePath="..\src\Model\ModelUtilities\TspSpc.f90"/>
+				<File RelativePath="..\src\Model\ModelUtilities\UtlTvg.f90"/>
 					<File RelativePath="..\src\Model\ModelUtilities\UzfCellGroup.f90"/>
 					<File RelativePath="..\src\Model\ModelUtilities\UzfEtUtil.f90"/>
 					<File RelativePath="..\src\Model\ModelUtilities\VectorInterpolation.f90"/>
@@ -944,7 +946,6 @@
 				<File RelativePath="..\src\Utilities\Table.f90"/>
 				<File RelativePath="..\src\Utilities\TableTerm.f90"/>
 				<File RelativePath="..\src\Utilities\Timer.f90"/>
-				<File RelativePath="..\src\Utilities\UtlTva.f90"/>
 				<File RelativePath="..\src\Utilities\version.f90"/>
 			</Filter>
 			<File RelativePath="..\src\mf6core.f90"/>

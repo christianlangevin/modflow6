@@ -17,10 +17,10 @@ module GwfSwiInputModule
     logical :: zeta = .false.
     logical :: fileout = .false.
     logical :: zetafile = .false.
-    logical :: tva6_filerecord = .false.
-    logical :: tva6 = .false.
+    logical :: tvg6_filerecord = .false.
+    logical :: tvg6 = .false.
     logical :: filein = .false.
-    logical :: tva6_filename = .false.
+    logical :: tvg6_filename = .false.
     logical :: hsalt_user = .false.
     logical :: reldensdiff = .false.
   end type GwfSwiParamFoundType
@@ -31,7 +31,7 @@ module GwfSwiInputModule
   character(len=16), parameter :: &
     gwf_swi_subpackages(*) = &
     [ &
-    '                ' &
+    'UTL-TVG         ' &
     ]
 
   type(InputParamDefinitionType), parameter :: &
@@ -111,14 +111,14 @@ module GwfSwiInputModule
     )
 
   type(InputParamDefinitionType), parameter :: &
-    gwfswi_tva6_filerecord = InputParamDefinitionType &
+    gwfswi_tvg6_filerecord = InputParamDefinitionType &
     ( &
     'GWF', & ! component
     'SWI', & ! subcomponent
     'OPTIONS', & ! block
-    'TVA6_FILERECORD', & ! tag name
-    'TVA6_FILERECORD', & ! fortran variable
-    'RECORD TVA6 FILEIN TVA6_FILENAME', & ! type
+    'TVG6_FILERECORD', & ! tag name
+    'TVG6_FILERECORD', & ! fortran variable
+    'RECORD TVG6 FILEIN TVG6_FILENAME', & ! type
     '', & ! shape
     '', & ! longname
     .false., & ! required
@@ -130,13 +130,13 @@ module GwfSwiInputModule
     )
 
   type(InputParamDefinitionType), parameter :: &
-    gwfswi_tva6 = InputParamDefinitionType &
+    gwfswi_tvg6 = InputParamDefinitionType &
     ( &
     'GWF', & ! component
     'SWI', & ! subcomponent
     'OPTIONS', & ! block
-    'TVA6', & ! tag name
-    'TVA6', & ! fortran variable
+    'TVG6', & ! tag name
+    'TVG6', & ! fortran variable
     'KEYWORD', & ! type
     '', & ! shape
     'grid package component', & ! longname
@@ -168,13 +168,13 @@ module GwfSwiInputModule
     )
 
   type(InputParamDefinitionType), parameter :: &
-    gwfswi_tva6_filename = InputParamDefinitionType &
+    gwfswi_tvg6_filename = InputParamDefinitionType &
     ( &
     'GWF', & ! component
     'SWI', & ! subcomponent
     'OPTIONS', & ! block
-    'TVA6_FILENAME', & ! tag name
-    'TVA6_FILENAME', & ! fortran variable
+    'TVG6_FILENAME', & ! tag name
+    'TVG6_FILENAME', & ! fortran variable
     'STRING', & ! type
     '', & ! shape
     'file keyword', & ! longname
@@ -231,10 +231,10 @@ module GwfSwiInputModule
     gwfswi_zeta, &
     gwfswi_fileout, &
     gwfswi_zetafile, &
-    gwfswi_tva6_filerecord, &
-    gwfswi_tva6, &
+    gwfswi_tvg6_filerecord, &
+    gwfswi_tvg6, &
     gwfswi_filein, &
-    gwfswi_tva6_filename, &
+    gwfswi_tvg6_filename, &
     gwfswi_hsalt_user, &
     gwfswi_reldensdiff &
     ]
