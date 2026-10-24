@@ -18,6 +18,7 @@ module GwfSwiModule
   use GwfConductanceUtilsModule, only: hcond, vcond
   use UtlTvaModule, only: UtlTvaType
   use GwfNpfFormulationModule, only: GwfNpfFormulationType, SWI_FLOW
+  use FlowReductionInterfaceModule, only: FlowReductionType
   use GwfStoExtModule, only: GwfStoFormulationType, SWI_STORAGE
 
   implicit none
@@ -33,6 +34,21 @@ module GwfSwiModule
   integer(I4B), parameter :: SALTWATER_TWO_FLUID = 3 !< saltwater model with swi-swi exchange
   real(DP), parameter :: DEFAULT_RELDENSDIFF = 0.025D0 !< default relative density difference, (rhos - rhof) / rhof, for 1000. and 1025.
   real(DP), parameter :: ZONE_MINIMUM_THICKNESS = 1.d-3 !< minimum thickness of saltwater or freshwater zone to avoid numerical issues
+
+  !> @brief Supplies the flow-reduction interval to stress packages
+  !!
+  !! Holds the interval SWI maintains and hands it out through the neutral
+  !! interface. A stress package sees only a FlowReductionType and never
+  !! learns that SWI is behind it. It carries the arrays rather than a
+  !! reference to SWI so that the two type definitions do not depend on one
+  !! another.
+  !<
+  type, extends(FlowReductionType) :: SwiFlowReductionType
+    real(DP), dimension(:), pointer, contiguous :: botreduce => null() !< bottom of the interval per cell
+    real(DP), dimension(:), pointer, contiguous :: topreduce => null() !< top of the interval per cell
+  contains
+    procedure :: interval => swi_reduction_interval
+  end type SwiFlowReductionType
 
   type, extends(NumericalPackageType) :: GwfSwiType
 
@@ -55,6 +71,9 @@ module GwfSwiModule
     real(DP), pointer :: hsalt_user => null() !< user specified head of saltwater (zero by default)
     real(DP), dimension(:), pointer, contiguous :: hfresh => null() !< head of freshwater
     real(DP), dimension(:), pointer, contiguous :: hsalt => null() !< head of saltwater
+    real(DP), dimension(:), pointer, contiguous :: botreduce => null() !< bottom of the flow-reduction interval for each cell
+    real(DP), dimension(:), pointer, contiguous :: topreduce => null() !< top of the flow-reduction interval for each cell
+    type(SwiFlowReductionType) :: flowred !< handed to stress packages that reduce flow
     real(DP), dimension(:), pointer, contiguous :: hfreshold => null() !< old head of freshwater
     real(DP), dimension(:), pointer, contiguous :: hsaltold => null() !< old head of saltwater
     integer(I4B), dimension(:), pointer, contiguous :: ibound => null() !< pointer to model ibound
@@ -287,6 +306,17 @@ contains
     npf_form%npf => npf
     this%npf_form => npf_form
     call npf%add_flow_formulation(this%npf_form, SWI_FLOW)
+
+    ! the flow-reduction interval SWI maintains, and the small object that
+    ! hands it to any stress package that reduces a withdrawal
+    call mem_allocate(this%botreduce, this%dis%nodes, 'BOTREDUCE', this%memoryPath)
+    call mem_allocate(this%topreduce, this%dis%nodes, 'TOPREDUCE', this%memoryPath)
+    do n = 1, this%dis%nodes
+      this%botreduce(n) = this%dis%bot(n)
+      this%topreduce(n) = this%dis%top(n)
+    end do
+    this%flowred%botreduce => this%botreduce
+    this%flowred%topreduce => this%topreduce
     do n = 1, npf%dis%nodes
       do ipos = npf%dis%con%ia(n) + 1, npf%dis%con%ia(n + 1) - 1
         npf%iformulation(ipos) = SWI_FLOW
@@ -451,6 +481,8 @@ contains
 
     if (this%iconfiguration == FRESHWATER_ONE_FLUID) then
       call mem_deallocate(this%hsalt)
+      call mem_deallocate(this%botreduce)
+      call mem_deallocate(this%topreduce)
       call mem_deallocate(this%hsaltold)
     end if
 
@@ -835,6 +867,24 @@ contains
   !! coupling is pure Picard with no Newton term, and the undamped update can
   !! oscillate. The relaxed bound converges to the current-head value as the
   !! iterations converge, so the reduced rate is still exact at convergence.
+  !> @brief Narrow the flow-reduction interval to the fluid zone
+  !!
+  !! A freshwater model raises the bottom of the interval to the interface,
+  !! a saltwater model lowers the top to it, so a withdrawal is tapered
+  !! against the fluid actually present rather than the whole cell.
+  !<
+  subroutine swi_reduction_interval(this, n, bt, tp)
+    class(SwiFlowReductionType), intent(in) :: this !< the provider
+    integer(I4B), intent(in) :: n !< reduced node number
+    real(DP), intent(inout) :: bt !< bottom of the interval
+    real(DP), intent(inout) :: tp !< top of the interval
+
+    if (.not. associated(this%botreduce)) return
+    bt = max(bt, this%botreduce(n))
+    tp = min(tp, this%topreduce(n))
+
+  end subroutine swi_reduction_interval
+
   subroutine swinpf_cf(this, kiter)
     class(SwiNpfFormulationType), intent(inout) :: this
     integer(I4B), intent(in) :: kiter
@@ -845,20 +895,20 @@ contains
       do n = 1, this%npf%dis%nodes
         target_elev = max(this%npf%dis%bot(n), this%swi%get_zetanew(n))
         if (kiter == 1) then
-          this%npf%botreduce(n) = target_elev
+          this%swi%botreduce(n) = target_elev
         else
-          this%npf%botreduce(n) = this%npf%botreduce(n) + &
-                                  DHALF * (target_elev - this%npf%botreduce(n))
+          this%swi%botreduce(n) = this%swi%botreduce(n) + &
+                                  DHALF * (target_elev - this%swi%botreduce(n))
         end if
       end do
     else
       do n = 1, this%npf%dis%nodes
         target_elev = min(this%npf%dis%top(n), this%swi%get_zetanew(n))
         if (kiter == 1) then
-          this%npf%topreduce(n) = target_elev
+          this%swi%topreduce(n) = target_elev
         else
-          this%npf%topreduce(n) = this%npf%topreduce(n) + &
-                                  DHALF * (target_elev - this%npf%topreduce(n))
+          this%swi%topreduce(n) = this%swi%topreduce(n) + &
+                                  DHALF * (target_elev - this%swi%topreduce(n))
         end if
       end do
     end if
