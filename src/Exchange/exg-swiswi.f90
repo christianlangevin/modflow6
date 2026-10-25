@@ -219,6 +219,19 @@ contains
     ! source options
     call this%source_options(iout)
 
+    ! the cross-flow Newton terms differentiate the upstream cell's fraction;
+    ! without upstream weighting (SWI dev option) the flow term is Picard in
+    ! both models, so drop the cross-flow terms and their sparsity
+    if (this%gwf_fresh%swi%inoupstream /= 0 .or. &
+        this%gwf_salt%swi%inoupstream /= 0) then
+      if (this%inocrossflow == 0) then
+        this%inocrossflow = 1
+        write (iout, '(4x,a)') &
+          'Cross-fluid flow Newton terms are DISABLED because a SWI Package &
+          &runs without upstream weighting (dev option).'
+      end if
+    end if
+
     ! allocate arrays
     call this%allocate_arrays()
 

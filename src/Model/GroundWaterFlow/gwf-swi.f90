@@ -43,6 +43,7 @@ module GwfSwiModule
     integer(I4B), pointer :: isaltwater => null() !< 0 is freshwater, 1 is saltwater
     integer(I4B), pointer :: izetaout => null() !< unit number for binary zeta output file
     integer(I4B), pointer :: intvg => null() !< flag: a TVG6 file supplies hsalt
+    integer(I4B), pointer :: inoupstream => null() !< flag: average (do not upstream-weight) the fluid-zone conductance; dev option
     character(len=LENMEMPATH) :: tvg6_mempath = '' !< input memory path of the TVG subpackage
     real(DP), dimension(:), pointer, contiguous :: zeta => null() !< starting zeta
     real(DP), dimension(:), pointer, contiguous :: hcof => null() !< hcof contribution to amat
@@ -455,6 +456,7 @@ contains
     call mem_deallocate(this%isaltwater)
     call mem_deallocate(this%izetaout)
     call mem_deallocate(this%intvg)
+    call mem_deallocate(this%inoupstream)
     call mem_deallocate(this%reldensdiff)
     call mem_deallocate(this%alphaf)
     call mem_deallocate(this%alphas)
@@ -500,6 +502,7 @@ contains
     call mem_allocate(this%isaltwater, 'ISALTWATER', this%memoryPath)
     call mem_allocate(this%izetaout, 'IZETAOUT', this%memoryPath)
     call mem_allocate(this%intvg, 'INTVG', this%memoryPath)
+    call mem_allocate(this%inoupstream, 'INOUPSTREAM', this%memoryPath)
     call mem_allocate(this%alphaf, 'ALPHAF', this%memoryPath)
     call mem_allocate(this%alphas, 'ALPHAS', this%memoryPath)
     call mem_allocate(this%reldensdiff, 'RELDENSDIFF', this%memoryPath)
@@ -508,6 +511,7 @@ contains
     ! Initialize value
     this%izetaout = 0
     this%intvg = 0
+    this%inoupstream = 0
     this%reldensdiff = DEFAULT_RELDENSDIFF
     call this%set_alphas()
     this%hsalt_user = DZERO
@@ -571,6 +575,8 @@ contains
                        found%hsalt_user)
     call mem_set_value(this%reldensdiff, 'RELDENSDIFF', this%input_mempath, &
                        found%reldensdiff)
+    call mem_set_value(this%inoupstream, 'INOUPSTREAM', this%input_mempath, &
+                       found%inoupstream)
 
     ! the interface coefficients follow from the relative density difference
     if (found%reldensdiff) then
@@ -640,6 +646,12 @@ contains
     if (found%tvg6_filename) then
       write (this%iout, '(4x,a)') &
         'Saltwater head will be read from file.'
+    end if
+    if (found%inoupstream) then
+      write (this%iout, '(4x,a)') &
+        'Upstream weighting of the fluid-zone conductance is DISABLED &
+        &(dev option). The NPF cell-averaging method is used instead and &
+        &the flow-term Newton derivatives are omitted.'
     end if
     write (this%iout, '(1x,a,/)') 'End Setting SWI Options'
 
@@ -979,6 +991,7 @@ contains
     integer(I4B) :: ihc, jas, ictn, ictm
     real(DP) :: hyn, hym, cond, condsw
     real(DP) :: satn_s, satm_s, tn, tm, bn, bm, tthkn, tthkm
+    real(DP) :: satn_f, satm_f, swn, swm
     !
     npf => this%npf
     condf = DZERO
@@ -996,6 +1009,39 @@ contains
     tthkm = tm - bm
     hyn = npf%hy_eff(n, m, ihc, ipos=ipos)
     hym = npf%hy_eff(m, n, ihc, ipos=ipos)
+    !
+    ! -- DEV_NO_UPSTREAM_WEIGHTING: average the fluid-zone fraction of the two
+    !    cells with the NPF cell-averaging method (ICELLAVG) instead of taking
+    !    the upstream cell's fraction. The fraction is averaged directly rather
+    !    than as the water-column minus salt-column difference used below,
+    !    because that difference equals the fluid-zone conductance only for
+    !    upstream (or arithmetic-mean) weighting; a harmonic mean of the two
+    !    columns is not the harmonic mean of their difference. Cell type is
+    !    forced convertible so the fraction is honored for confined cells too.
+    !    Smoothing follows the Newton setting, as elsewhere.
+    if (this%swi%inoupstream /= 0) then
+      call swi_thksat(tn, bn, this%swi%get_zetanew(n), satn_s, npf%inewton)
+      call swi_thksat(tm, bm, this%swi%get_zetanew(m), satm_s, npf%inewton)
+      if (this%swi%isaltwater == 1) then
+        satn_f = satn_s
+        satm_f = satm_s
+      else
+        swn = DONE
+        swm = DONE
+        if (npf%icelltype(n) /= 0) swn = npf%sat(n)
+        if (npf%icelltype(m) /= 0) swm = npf%sat(m)
+        satn_f = max(swn - satn_s, DZERO)
+        satm_f = max(swm - satm_s, DZERO)
+      end if
+      condf = hcond(npf%ibound(n), npf%ibound(m), 1, 1, 0, ihc, &
+                    npf%icellavg, npf%condsat(jas), hnew(n), hnew(m), &
+                    satn_f, satm_f, hyn, hym, tn, tm, bn, bm, &
+                    npf%dis%con%cl1(jas), npf%dis%con%cl2(jas), &
+                    npf%dis%con%hwva(jas))
+      condf = max(condf, npf%condsat(jas) * ZONE_MINIMUM_THICKNESS / &
+                  min(tthkn, tthkm))
+      return
+    end if
     !
     ! -- full water-column (S^w) conductance, as in fc_default_flow
     cond = hcond(npf%ibound(n), npf%ibound(m), &
@@ -1091,6 +1137,11 @@ contains
     ! vertical restriction is not the bottleneck (interface storage is). It
     ! was therefore not included. Single-fluid vertical flow is unrestricted.
     if (npf%dis%con%ihc(jas) == C3D_VERTICAL) return
+    ! DEV_NO_UPSTREAM_WEIGHTING: the derivative below is the upstream cell's
+    ! fraction derivative. An averaged conductance depends on both cells'
+    ! fractions; that derivative is not implemented, so the flow term is
+    ! Picard and only the (weighting-independent) storage Newton terms remain.
+    if (this%swi%inoupstream /= 0) return
     idiag = npf%dis%con%ia(n)
     isymcon = npf%dis%con%isym(ipos)
     ! determine upstream node (by freshwater head)
