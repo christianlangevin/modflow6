@@ -103,3 +103,12 @@ longname relative density difference
 description dimensionless density difference between saltwater and freshwater, calculated as the saltwater density minus the freshwater density, divided by the freshwater density.  The value must be greater than zero.  If not specified, the default value is 0.025, which corresponds to a freshwater density of 1000. and a saltwater density of 1025.  The SWI Package uses this single dimensionless value instead of two densities because the interface position depends only on their ratio.  For a two-fluid simulation the same value must be specified for the freshwater model and the saltwater model; the SWI-SWI Exchange terminates with an error if the two differ.
 mf6internal reldensdiff
 
+
+block options
+name dev_no_upstream_weighting
+type keyword
+reader urword
+optional true
+longname disable upstream weighting of the fluid-zone conductance
+description keyword to disable upstream weighting of the freshwater or saltwater zone thickness in the intercell conductance.  This is a developer option for evaluating the weighting bias.  When specified, the fluid-zone saturated fractions of the two connected cells are averaged with the NPF cell-averaging method (harmonic by default, or as set with ALTERNATIVE\_CELL\_AVERAGING), the flow-term Newton derivatives are omitted, and the cross-fluid flow Newton terms of the SWI-SWI Exchange are disabled.  The storage Newton terms, which do not depend on the weighting, are retained.  The converged solution differs from the upstream-weighted solution only by the discretization of the intercell thickness.  Because the flow term is then solved by Picard iteration, two-fluid simulations with this option require backtracking in the Iterative Model Solution and typically need several times as many outer iterations; the harmonic-mean averaging cannot grow a fluid zone from zero thickness, so AMT-LMK or AMT-HMK averaging should be used.
+mf6internal inoupstream

@@ -23,6 +23,7 @@ module GwfSwiInputModule
     logical :: tvg6_filename = .false.
     logical :: hsalt_user = .false.
     logical :: reldensdiff = .false.
+    logical :: inoupstream = .false.
   end type GwfSwiParamFoundType
 
   logical :: gwf_swi_multi_package = .false.
@@ -225,6 +226,25 @@ module GwfSwiInputModule
     )
 
   type(InputParamDefinitionType), parameter :: &
+    gwfswi_inoupstream = InputParamDefinitionType &
+    ( &
+    'GWF', & ! component
+    'SWI', & ! subcomponent
+    'OPTIONS', & ! block
+    'DEV_NO_UPSTREAM_WEIGHTING', & ! tag name
+    'INOUPSTREAM', & ! fortran variable
+    'KEYWORD', & ! type
+    '', & ! shape
+    'disable upstream weighting of the fluid-zone conductance', & ! longname
+    .false., & ! required
+    .false., & ! developmode
+    .false., & ! multi-record
+    .false., & ! preserve case
+    .false., & ! layered
+    .false. & ! timeseries
+    )
+
+  type(InputParamDefinitionType), parameter :: &
     gwf_swi_param_definitions(*) = &
     [ &
     gwfswi_zeta_filerecord, &
@@ -236,7 +256,8 @@ module GwfSwiInputModule
     gwfswi_filein, &
     gwfswi_tvg6_filename, &
     gwfswi_hsalt_user, &
-    gwfswi_reldensdiff &
+    gwfswi_reldensdiff, &
+    gwfswi_inoupstream &
     ]
 
   type(InputParamDefinitionType), parameter :: &
