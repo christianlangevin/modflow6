@@ -52,7 +52,7 @@ module WelModule
     procedure :: log_wel_options
     procedure :: bnd_ck => wel_ck
     procedure :: bnd_cf => wel_cf
-    procedure, private :: reduces
+    procedure, private :: reduction_interval
     procedure, private :: reduction_factor
     procedure :: bnd_fc => wel_fc
     procedure :: bnd_fn => wel_fn
@@ -380,6 +380,8 @@ contains
     character(len=LINELENGTH) :: errmsg
     integer(I4B) :: i
     integer(I4B) :: node
+    real(DP) :: bt, tp
+    logical(LGP) :: lreduce
     real(DP) :: afraux
     real(DP) :: thick
     ! -- formats
@@ -402,12 +404,8 @@ contains
     !
     ! -- a formulation that returns the reduction factor itself works from a
     !    dimensionless fraction, so a length cannot be honored
-    if (this%iflowredlen /= 0) then
-      if (associated(this%flowred_provider)) then
-        if (this%flowred_provider%defines_limit) then
-          call store_error(fmtlimlen)
-        end if
-      end if
+    if (this%iflowredlen /= 0 .and. this%flowred_limit) then
+      call store_error(fmtlimlen)
     end if
     !
     ! -- check the per-well auxiliary flow reduction values. The value must be
@@ -422,7 +420,8 @@ contains
         ! -- without a narrowed interval the reduction applies only to
         !    convertible cells; with one, any cell can be reduced, so the
         !    per-well value must be valid there too
-        if (.not. this%reduces(node)) cycle
+        call this%reduction_interval(node, bt, tp, lreduce)
+        if (.not. lreduce) cycle
         afraux = this%auxvar(this%iafrauxcol, i)
         if (this%iflowredlen == 0) then
           ! -- value is a fraction of the cell thickness: valid range (0, 1]
@@ -482,35 +481,32 @@ contains
     end do
   end subroutine wel_cf
 
-  !> @brief Whether a withdrawal from this cell is subject to reduction
+  !> @brief Interval of cell elevations holding the fluid, and whether to taper
   !!
-  !! With no formulation active the reduction applies only to convertible
-  !! cells, as it always has. A formulation that narrows the fluid interval
-  !! makes it apply whatever the cell type, because the fluid being withdrawn
-  !! can run out in a cell that is nowhere near empty. A formulation that
-  !! returns the factor itself decides for every cell.
+  !! The interval spans the cell unless a formulation narrows it. With no
+  !! formulation the reduction applies only to convertible cells, as it always
+  !! has; where the interval is narrowed it applies whatever the cell type,
+  !! because the fluid being withdrawn can run out in a cell that is nowhere
+  !! near empty.
   !<
-  logical(LGP) function reduces(this, node)
+  subroutine reduction_interval(this, node, bt, tp, lreduce)
     class(WelType), intent(inout) :: this !< this WEL instance
     integer(I4B), intent(in) :: node !< reduced node number
-    ! -- local variables
-    real(DP) :: bt, tp
+    real(DP), intent(out) :: bt !< bottom of the interval
+    real(DP), intent(out) :: tp !< top of the interval
+    logical(LGP), intent(out) :: lreduce !< whether to reduce in this cell
 
-    reduces = this%icelltype(node) /= 0
-    if (.not. associated(this%flowred_provider)) return
+    bt = this%dis%bot(node)
+    tp = this%dis%top(node)
+    lreduce = this%icelltype(node) /= 0
+    if (.not. this%flowred_interval) return
 
-    if (this%flowred_provider%defines_limit) then
-      reduces = .true.
-    else if (this%flowred_provider%defines_interval) then
-      bt = this%dis%bot(node)
-      tp = this%dis%top(node)
-      call this%flowred_provider%interval(node, bt, tp)
-      reduces = reduces .or. &
-                bt > this%dis%bot(node) .or. &
-                tp < this%dis%top(node)
-    end if
+    call this%flowred_provider%interval(node, bt, tp)
+    lreduce = lreduce .or. &
+              bt > this%dis%bot(node) .or. &
+              tp < this%dis%top(node)
 
-  end function reduces
+  end subroutine reduction_interval
 
   !> @brief Factor to apply to a withdrawal, and its derivative
   !!
@@ -535,11 +531,10 @@ contains
     real(DP), intent(out) :: dfdh !< derivative of f with respect to head
     ! -- local variables
     real(DP) :: bt, tp, tptaper, thick, frac, h, hv
-    logical(LGP) :: lnarrow
+    logical(LGP) :: lreduce
 
     f = DONE
     dfdh = DZERO
-    if (.not. this%reduces(node)) return
 
     ! -- the fraction, or length, the user asked to taper over
     if (this%iafrauxcol > 0) then
@@ -550,25 +545,15 @@ contains
     h = this%xnew(node)
 
     ! -- a formulation that defines the reduction does all of it
-    if (associated(this%flowred_provider)) then
-      if (this%flowred_provider%defines_limit) then
-        call this%flowred_provider%limit(node, h, frac, f, dfdh)
-        return
-      end if
+    if (this%flowred_limit) then
+      call this%flowred_provider%limit(node, h, frac, f, dfdh)
+      return
     end if
 
-    ! -- the interval the fluid occupies
-    bt = this%dis%bot(node)
-    tp = this%dis%top(node)
-    lnarrow = .false.
-    if (associated(this%flowred_provider)) then
-      if (this%flowred_provider%defines_interval) then
-        call this%flowred_provider%interval(node, bt, tp)
-        lnarrow = .true.
-      end if
-    end if
+    call this%reduction_interval(node, bt, tp, lreduce)
+    if (.not. lreduce) return
 
-    ! -- the taper, measured up from the bottom of that interval
+    ! -- the taper, measured up from the bottom of the interval
     if (this%iflowredlen == 0) then
       thick = tp - bt
     else
@@ -576,14 +561,14 @@ contains
     end if
     tptaper = bt + frac * thick
     hv = h
-    if (lnarrow) then
+    if (this%flowred_interval) then
       tptaper = min(tptaper, tp)
       hv = min(h, tp)
     end if
     if (tptaper <= bt) return
 
     f = sQSaturation(tptaper, bt, hv)
-    if (lnarrow .and. h >= tp) then
+    if (this%flowred_interval .and. h >= tp) then
       ! -- hv is pinned at the top of the interval, so f does not vary with h
       dfdh = DZERO
     else

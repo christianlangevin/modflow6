@@ -86,7 +86,9 @@ module BndModule
     !
     ! -- viscosity flag and safe-copy of conductance array
     integer(I4B), pointer :: ivsc => null() !< flag indicating if viscosity is active in the model
-    class(FlowReductionType), pointer :: flowred_provider => null() !< supplies the flow-reduction interval; null when nothing narrows it
+    class(FlowReductionType), pointer :: flowred_provider => null() !< supplies flow-reduction information; null when no formulation does
+    logical(LGP) :: flowred_limit = .false. !< provider returns the reduction factor itself
+    logical(LGP) :: flowred_interval = .false. !< provider narrows the fluid interval
     real(DP), dimension(:), pointer, contiguous :: condinput => null() !< stores user-specified conductance values
     !
     ! -- timeseries
@@ -118,6 +120,7 @@ module BndModule
     procedure :: bnd_ac
     procedure :: bnd_mc
     procedure :: bnd_ar
+    procedure :: set_flowred_provider
     procedure :: bnd_rp
     procedure :: bnd_ad
     procedure :: bnd_ck
@@ -258,6 +261,21 @@ contains
     integer(I4B), intent(in) :: moffset !< solution matrix model offset
     class(MatrixBaseType), pointer :: matrix_sln !< global system matrix
   end subroutine bnd_mc
+
+  !> @brief Attach a provider of flow-reduction information
+  !!
+  !! What the provider can answer is fixed once it is attached, so it is
+  !! resolved here rather than queried on every well in every iteration.
+  !<
+  subroutine set_flowred_provider(this, provider)
+    class(BndType) :: this !< this boundary package
+    class(FlowReductionType), pointer, intent(in) :: provider !< the provider
+
+    this%flowred_provider => provider
+    this%flowred_limit = provider%defines_limit
+    this%flowred_interval = provider%defines_interval
+
+  end subroutine set_flowred_provider
 
   !> @ brief Allocate and read method for boundary package
   !!
