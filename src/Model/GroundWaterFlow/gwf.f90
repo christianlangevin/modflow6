@@ -319,6 +319,8 @@ contains
   !!
   !<
   subroutine gwf_ar(this)
+    ! -- modules
+    use WelModule, only: WelType
     ! -- dummy
     class(GwfModelType) :: this
     ! -- locals
@@ -355,6 +357,14 @@ contains
       call packobj%bnd_ar()
       if (this%inbuy > 0) call this%buy%buy_ar_bnd(packobj, this%x)
       if (this%invsc > 0) call this%vsc%vsc_ar_bnd(packobj)
+      ! -- a package that tapers a withdrawal asks the SWI provider for the
+      !    factor, so the taper follows the fluid zone
+      if (this%inswi > 0) then
+        select type (p => packobj)
+        class is (WelType)
+          p%flowred_provider => this%swi%flowred
+        end select
+      end if
     end do
   end subroutine gwf_ar
 

@@ -11,7 +11,8 @@ module GwfSwiModule
   use GwfNpfModule, only: GwfNpfType
   use GwfStoModule, only: GwfStoType
   use SmoothingModule, only: sQuadraticSaturation, &
-                             sQuadraticSaturationDerivative, sSCurve
+                             sQuadraticSaturationDerivative, sSCurve, &
+                             sQSaturation, sQSaturationDerivative
   use MemoryManagerModule, only: mem_setptr, mem_allocate
   use MemoryHelperModule, only: create_mem_path
   use MatrixBaseModule
@@ -19,6 +20,7 @@ module GwfSwiModule
   use UtlTvgModule, only: UtlTvgType
   use GwfNpfFormulationModule, only: GwfNpfFormulationType, SWI_FLOW
   use GwfStoExtModule, only: GwfStoFormulationType, SWI_STORAGE
+  use FlowReductionInterfaceModule, only: FlowReductionType
 
   implicit none
   private
@@ -75,6 +77,9 @@ module GwfSwiModule
     class(GwfNpfFormulationType), pointer :: npf_form => null()
     ! SWI storage formulation (overrides the default STO terms; adds bd/save_flows)
     class(GwfStoFormulationType), pointer :: sto_form => null()
+    ! SWI flow-reduction provider (answers stress packages that taper a
+    ! withdrawal, such as WEL AUTO_FLOW_REDUCE, with the fluid-zone factor)
+    class(FlowReductionType), pointer :: flowred => null()
 
   contains
 
@@ -108,11 +113,24 @@ module GwfSwiModule
     class(GwfSwiType), pointer :: swi => null() !< owning SWI package
     type(GwfNpfType), pointer :: npf => null() !< the model NPF package
   contains
-    procedure :: cf => swinpf_cf
     procedure :: fc => swinpf_fc
     procedure :: fn => swinpf_fn
     procedure :: cq => swinpf_cq
   end type SwiNpfFormulationType
+
+  !> @brief Flow-reduction provider for SWI. Answers a stress package that
+  !! tapers a withdrawal (WEL AUTO_FLOW_REDUCE) with the factor for the fluid
+  !! zone this model simulates, so the withdrawal tapers as the zone thins
+  !! rather than as the cell empties, in confined cells too. The interface
+  !! moves with the head, and the derivative carries that dependence, so the
+  !! well term is consistent with the Newton formulation and needs no lag.
+  !<
+  type, extends(FlowReductionType) :: SwiFlowReductionType
+    class(GwfSwiType), pointer :: swi => null() !< owning SWI package
+    type(GwfNpfType), pointer :: npf => null() !< the model NPF package (cell type)
+  contains
+    procedure :: reduce => swi_reduce
+  end type SwiFlowReductionType
 
   !> @brief STO storage formulation for SWI (single-fluid freshwater). Assembles
   !! the freshwater storage as the water column (S^w, via the STO default) minus
@@ -219,6 +237,7 @@ contains
     integer(I4B) :: ipos
     type(SwiNpfFormulationType), pointer :: npf_form
     type(SwiStoFormulationType), pointer :: sto_form
+    type(SwiFlowReductionType), pointer :: flowred
 
     ! set pointer to ibound
     this%ibound => ibound
@@ -293,6 +312,12 @@ contains
         npf%iformulation(ipos) = SWI_FLOW
       end do
     end do
+
+    ! the flow-reduction provider; the model hands it to the stress packages
+    allocate (flowred)
+    flowred%swi => this
+    flowred%npf => npf
+    this%flowred => flowred
 
     ! register the SWI STO storage formulation. Storage formulations compose
     ! additively, so the claim mask is only set where SWI must replace the
@@ -464,6 +489,12 @@ contains
 
     ! deallocate parent
     call this%NumericalPackageType%da()
+
+    ! the flow-reduction provider
+    if (associated(this%flowred)) then
+      deallocate (this%flowred)
+      nullify (this%flowred)
+    end if
 
     ! nullify pointers
     nullify (this%hfresh)
@@ -826,55 +857,70 @@ contains
     return
   end subroutine swi_thksat
 
-  !> @brief SWI NPF formulation: per-iteration preparation.
+  !> @brief SWI flow-reduction provider: factor for a withdrawal from cell n,
+  !! and its derivative with respect to this model's head.
   !!
-  !! Refresh the NPF flow-reduction interval from the current heads. The
-  !! interval bounds the part of the cell occupied by the fluid this model
-  !! simulates: for a freshwater model the fresh zone is bounded BELOW by the
-  !! interface, so the interval bottom is max(cell bottom, zeta); for a
-  !! saltwater model the salt zone is bounded ABOVE by the interface, so the
-  !! interval top is min(cell top, zeta). Stress packages (WEL
-  !! AUTO_FLOW_REDUCE) read these arrays through NPF so their flow reduction
-  !! tapers as the fluid zone in the cell thins, without either package
-  !! referencing the other. zeta is treated as a lagged constant within the
-  !! iteration (Picard treatment of the zeta coupling), so the reduced rate is
-  !! exact at convergence.
+  !! Freshwater model: the freshwater zone runs from the interface, or the cell
+  !! bottom where the interface is below it, up to the water table or the cell
+  !! top. The factor tapers up from the zone bottom over the taper length and
+  !! is evaluated at the zone top, so a confined cell whose head is far above
+  !! the cell top is still reduced as the interface fills the cell. The
+  !! interface moves with the head (dzeta/dh^f = -alphaf), so where it is the
+  !! zone bottom the derivative carries 1 + alphaf; where the water table is
+  !! above the cell top the zone top is fixed and the head term drops out.
+  !!
+  !! Saltwater model: the saltwater zone runs from the cell bottom up to the
+  !! interface or the cell top. The factor tapers up from the cell bottom and
+  !! is evaluated at the zone top; dzeta/dh^s = alphas.
   !<
-  !! The interval bounds are under-relaxed across outer iterations (direct on
-  !! the first iteration, halved steps toward the current-head target after
-  !! that) to damp the well-interface coupling: when a well's reduction is
-  !! controlled by the lagged interval (e.g. a capped or saltwater well) the
-  !! coupling is pure Picard with no Newton term, and the undamped update can
-  !! oscillate. The relaxed bound converges to the current-head value as the
-  !! iterations converge, so the reduced rate is still exact at convergence.
-  subroutine swinpf_cf(this, kiter)
-    class(SwiNpfFormulationType), intent(inout) :: this
-    integer(I4B), intent(in) :: kiter
+  subroutine swi_reduce(this, n, h, taper, f, dfdh)
+    class(SwiFlowReductionType), intent(in) :: this
+    integer(I4B), intent(in) :: n
+    real(DP), intent(in) :: h
+    real(DP), intent(in) :: taper
+    real(DP), intent(out) :: f
+    real(DP), intent(out) :: dfdh
     ! local
-    integer(I4B) :: n
-    real(DP) :: target_elev
+    real(DP) :: tp, bt, zeta, x, dxdh, bz, dbzdh
+    f = DONE
+    dfdh = DZERO
+    if (taper <= DZERO) return
+    tp = this%npf%dis%top(n)
+    bt = this%npf%dis%bot(n)
+    zeta = this%swi%get_zetanew(n)
     if (this%swi%isaltwater == 0) then
-      do n = 1, this%npf%dis%nodes
-        target_elev = max(this%npf%dis%bot(n), this%swi%get_zetanew(n))
-        if (kiter == 1) then
-          this%npf%botreduce(n) = target_elev
-        else
-          this%npf%botreduce(n) = this%npf%botreduce(n) + &
-                                  DHALF * (target_elev - this%npf%botreduce(n))
-        end if
-      end do
+      ! freshwater zone: bottom at the interface (or the cell bottom), top at
+      ! the water table (or the cell top)
+      if (zeta > bt) then
+        bz = zeta
+        dbzdh = -this%swi%alphaf
+      else
+        bz = bt
+        dbzdh = DZERO
+      end if
+      if (this%npf%icelltype(n) /= 0 .and. h < tp) then
+        x = h
+        dxdh = DONE
+      else
+        x = tp
+        dxdh = DZERO
+      end if
     else
-      do n = 1, this%npf%dis%nodes
-        target_elev = min(this%npf%dis%top(n), this%swi%get_zetanew(n))
-        if (kiter == 1) then
-          this%npf%topreduce(n) = target_elev
-        else
-          this%npf%topreduce(n) = this%npf%topreduce(n) + &
-                                  DHALF * (target_elev - this%npf%topreduce(n))
-        end if
-      end do
+      ! saltwater zone: bottom at the cell bottom, top at the interface (or
+      ! the cell top)
+      bz = bt
+      dbzdh = DZERO
+      if (zeta < tp) then
+        x = zeta
+        dxdh = this%swi%alphas
+      else
+        x = tp
+        dxdh = DZERO
+      end if
     end if
-  end subroutine swinpf_cf
+    f = sQSaturation(bz + taper, bz, x)
+    dfdh = sQSaturationDerivative(bz + taper, bz, x) * (dxdh - dbzdh)
+  end subroutine swi_reduce
 
   !> @brief SWI NPF formulation: vertical conductance for a connection between an
   !! upper and a lower cell.

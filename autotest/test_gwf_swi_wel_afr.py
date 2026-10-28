@@ -1,13 +1,14 @@
 """
-WEL AUTO_FLOW_REDUCE under SWI: the reduction is referenced to the NPF
-flow-reduction interval [botreduce, topreduce] -- the part of the cell occupied
-by the fluid the model simulates -- instead of the whole cell. SWI narrows the
-interval each outer iteration: a freshwater model raises botreduce to
-max(cell bottom, zeta) and a saltwater model lowers topreduce to
-min(cell top, zeta). The taper argument is min(h, topreduce), and the
-reduction applies to confined cells too whenever the interval has been
-narrowed (in plain MODFLOW a confined cell cannot dewater, but under SWI its
-fluid zone can vanish as the interface moves through it).
+WEL AUTO_FLOW_REDUCE under SWI: WEL asks the SWI flow-reduction provider for
+the factor instead of tapering over the whole cell. The provider tapers over
+the part of the cell occupied by the fluid the model simulates: a freshwater
+model from max(cell bottom, zeta) up to the water table or the cell top, a
+saltwater model from the cell bottom up to min(cell top, zeta). The interface
+is computed from the current heads inside the Newton iteration and the
+derivative carries its dependence on the head, so there is no lag. The
+reduction applies to confined cells too (in plain MODFLOW a confined cell
+cannot dewater, but under SWI its fluid zone can vanish as the interface
+moves through it).
 
 Cases:
 1. swi-welafr01 (single-fluid, unconfined): two-cell drawdown; the pumped
@@ -58,11 +59,11 @@ def sQSaturation(top, bot, x):
     return -2.0 / b**3 * w**3 + 3.0 / b**2 * w**2
 
 
-def expected_qmult(h, cell_top, cell_bot, ict, botred, topred):
+def expected_qmult(h, cell_top, cell_bot, ict, botred, topred, frac=afr):
     """mirror of the wel_cf reduction with the [botreduce, topreduce] interval."""
     if not (ict != 0 or botred > cell_bot or topred < cell_top):
         return 1.0
-    band = afr * (cell_top - cell_bot)
+    band = frac * (cell_top - cell_bot)
     if band <= 0.0:
         return 1.0
     return sQSaturation(botred + band, botred, min(h, topred))
@@ -196,8 +197,13 @@ zeta0 = -0.5
 tf = {
     # fresh well in the top cell, salt supplied by a bottom CHD
     1: dict(saltwell=False, q=-0.02, nstp=20),
-    # salt well in the bottom cell, fresh supplied by a top CHD
-    3: dict(saltwell=True, q=-0.05, nstp=30),
+    # salt well in the bottom cell, fresh supplied by a top CHD. The taper
+    # band is half the cell (0.5 m) so that the band is wider than the 0.25 m
+    # the interface drops per step and the throttled state is resolved over
+    # several steps; with the 0.1 m band of the other cases the interface
+    # crossed the band within one step, the well pumped at full rate until
+    # the zone was gone and the throttling was never actually simulated.
+    3: dict(saltwell=True, q=-0.05, nstp=30, afr=0.5),
 }
 
 
@@ -229,7 +235,7 @@ def build_gwf_tf(sim, is_salt, p):
     if has_well:
         flopy.mf6.ModflowGwfwel(
             gwf,
-            auto_flow_reduce=afr,
+            auto_flow_reduce=p.get("afr", afr),
             stress_period_data=[[well_cell, p["q"]]],
         )
     else:
@@ -288,13 +294,21 @@ def check_output_tf(idx, test):
         if prev_bounds is None:
             prev_bounds = (botred, topred)
         q_sim = float(bud.get_data(text="WEL", totim=t)[0]["q"][0])
-        q_exp = p["q"] * expected_qmult(h_well, cell_top, cell_bot, ict, botred, topred)
+        q_exp = p["q"] * expected_qmult(
+            h_well, cell_top, cell_bot, ict, botred, topred, p.get("afr", afr)
+        )
         # the reduction interval is under-relaxed across outer iterations, so
         # when the interface moves more than a band-width in one step the
         # applied bound can lag the converged interface by up to one step:
         # accept any rate between the tapers of the current and previous bounds
         q_lag = p["q"] * expected_qmult(
-            h_well, cell_top, cell_bot, ict, prev_bounds[0], prev_bounds[1]
+            h_well,
+            cell_top,
+            cell_bot,
+            ict,
+            prev_bounds[0],
+            prev_bounds[1],
+            p.get("afr", afr),
         )
         tol = 1.0e-6 + 1.0e-3 * abs(p["q"])
         lo, hi = min(q_exp, q_lag) - tol, max(q_exp, q_lag) + tol
