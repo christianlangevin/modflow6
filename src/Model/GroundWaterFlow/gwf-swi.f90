@@ -27,14 +27,15 @@ module GwfSwiModule
   public :: GwfSwiType
   public :: swi_cr
 
-  character(len=LENBUDTXT), dimension(1) :: budtxt = & !< text labels for budget terms
-    &['         STORAGE']
+  character(len=LENBUDTXT), dimension(2) :: budtxt = & !< text labels for budget terms
+    &['         STORAGE', '   SALT-EXCHANGE']
   integer(I4B), parameter :: FRESHWATER_ONE_FLUID = 0 !< freshwater model without swi-swi exchange
   integer(I4B), parameter :: FRESHWATER_TWO_FLUID = 1 !< freshwater model with swi-swi exchange
   integer(I4B), parameter :: SALTWATER_ONE_FLUID = 2 !< saltwater model without swi-swi exchange, not supported
   integer(I4B), parameter :: SALTWATER_TWO_FLUID = 3 !< saltwater model with swi-swi exchange
   real(DP), parameter :: DEFAULT_RELDENSDIFF = 0.025D0 !< default relative density difference, (rhos - rhof) / rhof, for 1000. and 1025.
   real(DP), parameter :: ZONE_MINIMUM_THICKNESS = 1.d-3 !< minimum thickness of saltwater or freshwater zone to avoid numerical issues
+  real(DP), parameter :: ZONE_PIN_BAND = ZONE_MINIMUM_THICKNESS !< fraction of the cell thickness (as head, through alphas) over which the salt-exchange term ramps from full to zero below the zone-vanishing head; the same scale as the minimum zone thickness
 
   type, extends(NumericalPackageType) :: GwfSwiType
 
@@ -46,11 +47,14 @@ module GwfSwiModule
     integer(I4B), pointer :: izetaout => null() !< unit number for binary zeta output file
     integer(I4B), pointer :: intvg => null() !< flag: a TVG6 file supplies hsalt
     integer(I4B), pointer :: inoupstream => null() !< flag: average (do not upstream-weight) the fluid-zone conductance; dev option
+    integer(I4B), pointer :: inosaltexch => null() !< flag: disable the salt-exchange term; dev option
     character(len=LENMEMPATH) :: tvg6_mempath = '' !< input memory path of the TVG subpackage
     real(DP), dimension(:), pointer, contiguous :: zeta => null() !< starting zeta
     real(DP), dimension(:), pointer, contiguous :: hcof => null() !< hcof contribution to amat
     real(DP), dimension(:), pointer, contiguous :: rhs => null() !< rhs contribution
     real(DP), dimension(:), pointer, contiguous :: storage => null() !< calculated swi storage
+    real(DP), dimension(:), pointer, contiguous :: qpin => null() !< flow that holds a cell without freshwater at its zone-vanishing head (SALT-EXCHANGE budget term)
+    real(DP), dimension(:), pointer, contiguous :: cpin => null() !< conductance scale of the salt-exchange term: the largest saturated conductance of the cell's connections
 
     ! information needed for full implementation
     real(DP), pointer :: reldensdiff => null() !< relative density difference, (rhos - rhof) / rhof; user input, default 0.025
@@ -80,6 +84,7 @@ module GwfSwiModule
     ! SWI flow-reduction provider (answers stress packages that taper a
     ! withdrawal, such as WEL AUTO_FLOW_REDUCE, with the fluid-zone factor)
     class(FlowReductionType), pointer :: flowred => null()
+    type(GwfNpfType), pointer :: npf => null() !< the model NPF package (budget-file flag)
 
   contains
 
@@ -88,6 +93,8 @@ module GwfSwiModule
     procedure :: swi_rp
     procedure :: swi_ad
     procedure :: swi_cq
+    procedure :: swi_bd
+    procedure :: swi_save_model_flows
     procedure :: swi_ot_dv
     procedure :: swi_da
     procedure, private :: swi_load
@@ -99,6 +106,7 @@ module GwfSwiModule
     procedure, private :: update_zeta
 
     procedure :: set_configuration
+    procedure :: salt_exchange_active
     procedure :: set_head_pointers
     procedure :: get_zetanew
     procedure :: get_zetaold
@@ -113,6 +121,7 @@ module GwfSwiModule
     class(GwfSwiType), pointer :: swi => null() !< owning SWI package
     type(GwfNpfType), pointer :: npf => null() !< the model NPF package
   contains
+    procedure :: cf => swinpf_cf
     procedure :: fc => swinpf_fc
     procedure :: fn => swinpf_fn
     procedure :: cq => swinpf_cq
@@ -238,9 +247,23 @@ contains
     type(SwiNpfFormulationType), pointer :: npf_form
     type(SwiStoFormulationType), pointer :: sto_form
     type(SwiFlowReductionType), pointer :: flowred
+    integer(I4B) :: nsx
 
     ! set pointer to ibound
     this%ibound => ibound
+    this%npf => npf
+
+    ! salt-exchange arrays, full size only where the term is used; the
+    ! SWI-SWI exchange has set the configuration by now (exchange df runs
+    ! before model ar)
+    nsx = 0
+    if (this%salt_exchange_active()) nsx = this%dis%nodes
+    call mem_allocate(this%qpin, nsx, 'QPIN', this%memoryPath)
+    call mem_allocate(this%cpin, nsx, 'CPIN', this%memoryPath)
+    do n = 1, nsx
+      this%qpin(n) = DZERO
+      this%cpin(n) = DZERO
+    end do
 
     ! set pointer to gwf steady state flag
     call mem_setptr(this%insto, 'INSTO', &
@@ -448,6 +471,64 @@ contains
     return
   end subroutine swi_ot_dv
 
+  !> @brief Add the salt-exchange flow to the model budget.
+  !!
+  !! The SALT-EXCHANGE term is the flow that holds a cell without freshwater at
+  !! its zone-vanishing head (see swinpf_pin_head): water exchanged with the
+  !! saltwater, which a single-fluid model does not simulate. It is zero wherever
+  !! freshwater exists. With consistent input it is small (leakage through the
+  !! minimum-zone floor); a large value means a stress package acts on a cell
+  !! that holds no freshwater (for example a drain or well in an all-saltwater
+  !! cell), so it flags such cells to the modeler. Only reported when the term
+  !! is active.
+  !<
+  subroutine swi_bd(this, isuppress_output, model_budget)
+    ! modules
+    use TdisModule, only: delt
+    use BudgetModule, only: BudgetType, rate_accumulator
+    ! dummy
+    class(GwfSwiType) :: this
+    integer(I4B), intent(in) :: isuppress_output
+    type(BudgetType), intent(inout) :: model_budget
+    ! local
+    real(DP) :: rin, rout
+    if (.not. this%salt_exchange_active()) return
+    call rate_accumulator(this%qpin, rin, rout)
+    call model_budget%addentry(rin, rout, delt, budtxt(2), &
+                               isuppress_output, '     SWI')
+  end subroutine swi_bd
+
+  !> @brief Save the salt-exchange flow to the cell-by-cell budget file, under
+  !! the same conditions as the NPF flows.
+  !<
+  subroutine swi_save_model_flows(this, icbcfl, icbcun)
+    ! dummy
+    class(GwfSwiType) :: this
+    integer(I4B), intent(in) :: icbcfl
+    integer(I4B), intent(in) :: icbcun
+    ! local
+    integer(I4B) :: ibinun
+    integer(I4B) :: iprint, nvaluesp, nwidthp
+    character(len=1) :: cdatafmp = ' ', editdesc = ' '
+    real(DP) :: dinact
+    if (.not. this%salt_exchange_active()) return
+    if (this%npf%ipakcb < 0) then
+      ibinun = icbcun
+    elseif (this%npf%ipakcb == 0) then
+      ibinun = 0
+    else
+      ibinun = this%npf%ipakcb
+    end if
+    if (icbcfl == 0) ibinun = 0
+    if (ibinun /= 0) then
+      iprint = 0
+      dinact = DZERO
+      call this%dis%record_array(this%qpin, this%iout, iprint, -ibinun, &
+                                 budtxt(2), cdatafmp, nvaluesp, &
+                                 nwidthp, editdesc, dinact)
+    end if
+  end subroutine swi_save_model_flows
+
   !> @brief Deallocate
   !<
   subroutine swi_da(this)
@@ -470,6 +551,8 @@ contains
     call mem_deallocate(this%hcof)
     call mem_deallocate(this%rhs)
     call mem_deallocate(this%storage)
+    call mem_deallocate(this%qpin)
+    call mem_deallocate(this%cpin)
 
     if (this%iconfiguration == FRESHWATER_ONE_FLUID) then
       call mem_deallocate(this%hsalt)
@@ -482,6 +565,7 @@ contains
     call mem_deallocate(this%izetaout)
     call mem_deallocate(this%intvg)
     call mem_deallocate(this%inoupstream)
+    call mem_deallocate(this%inosaltexch)
     call mem_deallocate(this%reldensdiff)
     call mem_deallocate(this%alphaf)
     call mem_deallocate(this%alphas)
@@ -534,6 +618,7 @@ contains
     call mem_allocate(this%izetaout, 'IZETAOUT', this%memoryPath)
     call mem_allocate(this%intvg, 'INTVG', this%memoryPath)
     call mem_allocate(this%inoupstream, 'INOUPSTREAM', this%memoryPath)
+    call mem_allocate(this%inosaltexch, 'INOSALTEXCH', this%memoryPath)
     call mem_allocate(this%alphaf, 'ALPHAF', this%memoryPath)
     call mem_allocate(this%alphas, 'ALPHAS', this%memoryPath)
     call mem_allocate(this%reldensdiff, 'RELDENSDIFF', this%memoryPath)
@@ -543,6 +628,7 @@ contains
     this%izetaout = 0
     this%intvg = 0
     this%inoupstream = 0
+    this%inosaltexch = 0
     this%reldensdiff = DEFAULT_RELDENSDIFF
     call this%set_alphas()
     this%hsalt_user = DZERO
@@ -608,6 +694,8 @@ contains
                        found%reldensdiff)
     call mem_set_value(this%inoupstream, 'INOUPSTREAM', this%input_mempath, &
                        found%inoupstream)
+    call mem_set_value(this%inosaltexch, 'INOSALTEXCH', this%input_mempath, &
+                       found%inosaltexch)
 
     ! the interface coefficients follow from the relative density difference
     if (found%reldensdiff) then
@@ -684,6 +772,10 @@ contains
         &(dev option). The NPF cell-averaging method is used instead and &
         &the flow-term Newton derivatives are omitted.'
     end if
+    if (found%inosaltexch) then
+      write (this%iout, '(4x,a)') &
+        'The salt-exchange term is DISABLED (dev option).'
+    end if
     write (this%iout, '(1x,a,/)') 'End Setting SWI Options'
 
   end subroutine log_options
@@ -732,6 +824,19 @@ contains
       this%isaltwater = 1
     end select
   end subroutine set_configuration
+
+  !> @brief Is the salt-exchange term active?
+  !!
+  !! Only in a single-fluid freshwater model, where the saltwater is not
+  !! simulated, and only unless DEV_NO_SALT_EXCHANGE is specified. In a
+  !! two-fluid simulation both fluids are simulated and the term is not used.
+  !<
+  function salt_exchange_active(this) result(active)
+    class(GwfSwiType) :: this
+    logical(LGP) :: active
+    active = this%iconfiguration == FRESHWATER_ONE_FLUID .and. &
+             this%inosaltexch == 0
+  end function salt_exchange_active
 
   !> @brief Set head pointers
   !! This will likely be called from the SWI-SWI exchange
@@ -856,6 +961,39 @@ contains
     ! Return
     return
   end subroutine swi_thksat
+
+  !> @brief SWI NPF formulation: per-iteration preparation.
+  !!
+  !! Conductance scale of the salt-exchange term: the largest saturated
+  !! conductance among the cell's connections, so the term holds the head as
+  !! firmly as the cell's own flow terms would; refreshed each time step in case
+  !! condsat changed (TVK). The term applies only to cells without vertical
+  !! connections: the SWI vertical conductance carries the fluid potential
+  !! through cells whose zone has vanished (single-fluid unrestricted, two-fluid
+  !! free in the buoyant direction), so a vertically connected cell is held by
+  !! its column, whereas a cell with horizontal connections only is left with
+  !! the minimum-zone floor conductances alone once its zone is gone.
+  !<
+  subroutine swinpf_cf(this, kiter)
+    class(SwiNpfFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: kiter
+    ! local
+    integer(I4B) :: n, ipos, jas
+    if (kiter /= 1) return
+    ! cpin stays zero, and with it the whole term, unless the term is active
+    if (.not. this%swi%salt_exchange_active()) return
+    do n = 1, this%npf%dis%nodes
+      this%swi%cpin(n) = DZERO
+      do ipos = this%npf%dis%con%ia(n) + 1, this%npf%dis%con%ia(n + 1) - 1
+        jas = this%npf%dis%con%jas(ipos)
+        if (this%npf%dis%con%ihc(jas) == C3D_VERTICAL) then
+          this%swi%cpin(n) = DZERO
+          exit
+        end if
+        this%swi%cpin(n) = max(this%swi%cpin(n), this%npf%condsat(jas))
+      end do
+    end do
+  end subroutine swinpf_cf
 
   !> @brief SWI flow-reduction provider: factor for a withdrawal from cell n,
   !! and its derivative with respect to this model's head.
@@ -1121,8 +1259,10 @@ contains
     !    Symmetric for both models, it keeps a fully drained fluid zone from
     !    producing a zero/negative row -- a singular system, or an unphysical
     !    negative conductance where S^s > S^w -- without perturbing normally
-    !    saturated cells. TODO: replacing this fixed threshold with proper
-    !    dry-zone handling would let ZONE_MINIMUM_THICKNESS be removed entirely.
+    !    saturated cells. A cell with horizontal connections only is held at its
+    !    zone-vanishing head by the salt-exchange term (swinpf_pin_weight) once
+    !    its zone is gone, so there the floor is only a regularization; the
+    !    floor remains the guard for vertically connected cells.
     condf = max(condf, npf%condsat(jas) * ZONE_MINIMUM_THICKNESS / &
                 min(tthkn, tthkm))
   end function swinpf_condf
@@ -1276,7 +1416,8 @@ contains
     real(DP), dimension(:), intent(inout) :: hnew
     ! local
     type(GwfNpfType), pointer :: npf
-    integer(I4B) :: n, m, ipos
+    integer(I4B) :: n, m, ipos, idiag
+    real(DP) :: w, dw, cw
     !
     npf => this%npf
     do n = 1, npf%dis%nodes
@@ -1287,6 +1428,19 @@ contains
         if (npf%iformulation(ipos) /= SWI_FLOW) cycle
         call swinpf_fc_conn(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
       end do
+    end do
+    ! salt-exchange term: hold a cell without freshwater at its
+    ! zone-vanishing head; Q = cpin * w * (hpin - h), with w the smoothed
+    ! weight (1 where the freshwater zone is gone, 0 once it exists)
+    if (.not. this%swi%salt_exchange_active()) return
+    do n = 1, npf%dis%nodes
+      if (npf%ibound(n) <= 0) cycle
+      call swinpf_pin_weight(this, n, hnew, w, dw)
+      if (w <= DZERO) cycle
+      idiag = npf%dis%con%ia(n)
+      cw = this%swi%cpin(n) * w
+      call matrix_sln%add_value_pos(idxglo(idiag), -cw)
+      rhs(n) = rhs(n) - cw * swinpf_pin_head(this, n)
     end do
   end subroutine swinpf_fc
 
@@ -1301,7 +1455,8 @@ contains
     real(DP), dimension(:), intent(inout) :: hnew
     ! local
     type(GwfNpfType), pointer :: npf
-    integer(I4B) :: n, m, ipos
+    integer(I4B) :: n, m, ipos, idiag
+    real(DP) :: w, dw, term
     !
     npf => this%npf
     do n = 1, npf%dis%nodes
@@ -1312,6 +1467,19 @@ contains
         if (npf%iformulation(ipos) /= SWI_FLOW) cycle
         call swinpf_fn_conn(this, n, m, ipos, matrix_sln, rhs, idxglo, hnew)
       end do
+    end do
+    ! salt-exchange term: the fc fill treats the weight as constant; add the
+    ! derivative of the weight with respect to the head, dQ/dh = cpin * dw/dh *
+    ! (hpin - h), to the diagonal in the usual Newton form
+    if (.not. this%swi%salt_exchange_active()) return
+    do n = 1, npf%dis%nodes
+      if (npf%ibound(n) <= 0) cycle
+      call swinpf_pin_weight(this, n, hnew, w, dw)
+      if (dw == DZERO) cycle
+      idiag = npf%dis%con%ia(n)
+      term = this%swi%cpin(n) * dw * (swinpf_pin_head(this, n) - hnew(n))
+      call matrix_sln%add_value_pos(idxglo(idiag), term)
+      rhs(n) = rhs(n) + term * hnew(n)
     end do
   end subroutine swinpf_fn
 
@@ -1326,7 +1494,8 @@ contains
     real(DP), dimension(:), intent(inout) :: flowja
     ! local
     type(GwfNpfType), pointer :: npf
-    integer(I4B) :: n, m, ipos
+    integer(I4B) :: n, m, ipos, idiag
+    real(DP) :: w, dw
     !
     npf => this%npf
     do n = 1, npf%dis%nodes
@@ -1337,7 +1506,77 @@ contains
         call swinpf_cq_conn(this, n, m, ipos, flowja, hnew)
       end do
     end do
+    ! salt-exchange flow, into the cell (positive into the cell, like flowja)
+    if (.not. this%swi%salt_exchange_active()) return
+    do n = 1, npf%dis%nodes
+      this%swi%qpin(n) = DZERO
+      if (npf%ibound(n) <= 0) cycle
+      call swinpf_pin_weight(this, n, hnew, w, dw)
+      if (w <= DZERO) cycle
+      idiag = npf%dis%con%ia(n)
+      this%swi%qpin(n) = this%swi%cpin(n) * w * &
+                         (swinpf_pin_head(this, n) - hnew(n))
+      flowja(idiag) = flowja(idiag) + this%swi%qpin(n)
+    end do
   end subroutine swinpf_cq
+
+  !> @brief SWI NPF formulation: head at which the fluid zone of cell n vanishes.
+  !!
+  !! Freshwater model: the freshwater head that puts the interface at the top of
+  !! the freshwater zone. Where the water table is at or above the cell top (or
+  !! the cell is confined) that is the cell top, zeta = top, so
+  !! h = (alphas*hs - top)/alphaf; where the water table is inside the cell it is
+  !! the water table itself, zeta = h, so h = alphas*hs/(1 + alphaf). The larger
+  !! of the two applies; they coincide when the water table is at the cell top.
+  !! Offshore, with a prescribed saltwater head, this is the equivalent
+  !! freshwater head of the sea at the cell top. The term is used only in a
+  !! single-fluid freshwater model (see salt_exchange_active).
+  !<
+  function swinpf_pin_head(this, n) result(hpin)
+    class(SwiNpfFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: n
+    real(DP) :: hpin
+    ! local
+    real(DP) :: tp
+    tp = this%npf%dis%top(n)
+    hpin = (this%swi%alphas * this%swi%hsalt(n) - tp) / this%swi%alphaf
+    if (this%npf%icelltype(n) /= 0) then
+      hpin = max(hpin, this%swi%alphas * this%swi%hsalt(n) / &
+                 (DONE + this%swi%alphaf))
+    end if
+  end function swinpf_pin_head
+
+  !> @brief SWI NPF formulation: weight of the salt-exchange term for cell n and
+  !! its derivative with respect to this model's head.
+  !!
+  !! One-sided: the weight is 1 where the head is below the zone-vanishing head
+  !! by more than a band, ramps smoothly to 0 at the zone-vanishing head, and is
+  !! 0 above it. The term therefore only holds a cell up from below: it never
+  !! absorbs fluid that flows into a cell at or above that head, so the discharge
+  !! at a tip stays with the cell's own boundary packages. The band is
+  !! ZONE_PIN_BAND of the cell thickness converted to head through alphas. A
+  !! freshwater cell whose zone-vanishing head is below the cell bottom can only
+  !! lose its freshwater by drying, not to saltwater, and is left to the usual
+  !! Newton dry-cell treatment.
+  !<
+  subroutine swinpf_pin_weight(this, n, hnew, w, dw)
+    class(SwiNpfFormulationType), intent(inout) :: this
+    integer(I4B), intent(in) :: n
+    real(DP), dimension(:), intent(in) :: hnew
+    real(DP), intent(out) :: w
+    real(DP), intent(out) :: dw
+    ! local
+    real(DP) :: hpin, band
+    w = DZERO
+    dw = DZERO
+    if (this%swi%cpin(n) <= DZERO) return
+    hpin = swinpf_pin_head(this, n)
+    if (hpin <= this%npf%dis%bot(n)) return
+    band = ZONE_PIN_BAND * (this%npf%dis%top(n) - this%npf%dis%bot(n)) / &
+           this%swi%alphas
+    w = DONE - sQuadraticSaturation(hpin, hpin - band, hnew(n))
+    dw = -sQuadraticSaturationDerivative(hpin, hpin - band, hnew(n))
+  end subroutine swinpf_pin_weight
 
   !> @brief SWI STO formulation: is this cell handled by SWI storage?
   !<
