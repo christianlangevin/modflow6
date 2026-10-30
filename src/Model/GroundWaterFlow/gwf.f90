@@ -828,6 +828,7 @@ contains
     call this%budget%reset()
     if (this%insto > 0) call this%sto%sto_bd(isuppress_output, this%budget)
     if (this%incsub > 0) call this%csub%csub_bd(isuppress_output, this%budget)
+    if (this%inswi > 0) call this%swi%swi_bd(isuppress_output, this%budget)
     if (this%inmvr > 0) call this%mvr%mvr_bd()
     do ip = 1, this%bndlist%Count()
       packobj => GetBndFromList(this%bndlist, ip)
@@ -944,6 +945,7 @@ contains
       call this%npf%npf_save_model_flows(this%flowja, icbcfl, icbcun)
     end if
     if (this%incsub > 0) call this%csub%csub_save_model_flows(icbcfl, icbcun)
+    if (this%inswi > 0) call this%swi%swi_save_model_flows(icbcfl, icbcun)
     do ip = 1, this%bndlist%Count()
       packobj => GetBndFromList(this%bndlist, ip)
       call packobj%bnd_ot_model_flows(icbcfl=icbcfl, ibudfl=0, icbcun=icbcun)

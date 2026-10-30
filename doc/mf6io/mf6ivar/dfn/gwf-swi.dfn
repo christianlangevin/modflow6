@@ -112,3 +112,12 @@ optional true
 longname disable upstream weighting of the fluid-zone conductance
 description keyword to disable upstream weighting of the freshwater or saltwater zone thickness in the intercell conductance.  This is a developer option for evaluating the weighting bias.  When specified, the fluid-zone saturated fractions of the two connected cells are averaged with the NPF cell-averaging method (harmonic by default, or as set with ALTERNATIVE\_CELL\_AVERAGING), the flow-term Newton derivatives are omitted, and the cross-fluid flow Newton terms of the SWI-SWI Exchange are disabled.  The storage Newton terms, which do not depend on the weighting, are retained.  The converged solution differs from the upstream-weighted solution only by the discretization of the intercell thickness.  Because the flow term is then solved by Picard iteration, two-fluid simulations with this option require backtracking in the Iterative Model Solution and typically need several times as many outer iterations; the harmonic-mean averaging cannot grow a fluid zone from zero thickness, so AMT-LMK or AMT-HMK averaging should be used.
 mf6internal inoupstream
+
+block options
+name dev_no_salt_exchange
+type keyword
+reader urword
+optional true
+longname disable the salt-exchange term
+description keyword to disable the salt-exchange term of a single-fluid freshwater model.  This is a developer option for evaluating the term.  By default, a cell without vertical connections that holds no freshwater is held at the freshwater head of a hydrostatic column of the unsimulated saltwater, the head that places the interface at the top of the freshwater zone.  Any flow needed to hold the cell at that head is reported in the model budget as SALT-EXCHANGE: water exchanged with the saltwater, which is not simulated.  With consistent input this flow is small; a large value indicates a stress package that adds or removes freshwater in a cell that holds none.  When this option is specified, such a cell is connected to its neighbors only through the minimum fluid-zone conductance, its head is poorly defined, and convergence can be much slower.  The term is not applied in two-fluid simulations.
+mf6internal inosaltexch

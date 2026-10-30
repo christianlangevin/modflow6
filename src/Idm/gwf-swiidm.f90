@@ -24,6 +24,7 @@ module GwfSwiInputModule
     logical :: hsalt_user = .false.
     logical :: reldensdiff = .false.
     logical :: inoupstream = .false.
+    logical :: inosaltexch = .false.
   end type GwfSwiParamFoundType
 
   logical :: gwf_swi_multi_package = .false.
@@ -245,6 +246,25 @@ module GwfSwiInputModule
     )
 
   type(InputParamDefinitionType), parameter :: &
+    gwfswi_inosaltexch = InputParamDefinitionType &
+    ( &
+    'GWF', & ! component
+    'SWI', & ! subcomponent
+    'OPTIONS', & ! block
+    'DEV_NO_SALT_EXCHANGE', & ! tag name
+    'INOSALTEXCH', & ! fortran variable
+    'KEYWORD', & ! type
+    '', & ! shape
+    'disable the salt-exchange term', & ! longname
+    .false., & ! required
+    .false., & ! developmode
+    .false., & ! multi-record
+    .false., & ! preserve case
+    .false., & ! layered
+    .false. & ! timeseries
+    )
+
+  type(InputParamDefinitionType), parameter :: &
     gwf_swi_param_definitions(*) = &
     [ &
     gwfswi_zeta_filerecord, &
@@ -257,7 +277,8 @@ module GwfSwiInputModule
     gwfswi_tvg6_filename, &
     gwfswi_hsalt_user, &
     gwfswi_reldensdiff, &
-    gwfswi_inoupstream &
+    gwfswi_inoupstream, &
+    gwfswi_inosaltexch &
     ]
 
   type(InputParamDefinitionType), parameter :: &
