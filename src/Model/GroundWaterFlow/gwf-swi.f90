@@ -3,7 +3,7 @@ module GwfSwiModule
   use KindModule, only: DP, I4B, LGP
   use ConstantsModule, only: LINELENGTH, DONE, DZERO, DHALF, LENBUDTXT, &
                              MNORMAL, DHNOFLO, C3D_VERTICAL, LENMODELNAME, &
-                             DEM6, DEM12, LENMEMPATH
+                             DEM6, LENMEMPATH
   use SimVariablesModule, only: errmsg
   use SimModule, only: store_error, store_error_filename
   use NumericalPackageModule, only: NumericalPackageType
@@ -47,9 +47,7 @@ module GwfSwiModule
     integer(I4B), pointer :: intvg => null() !< flag: a TVG6 file supplies hsalt
     integer(I4B), pointer :: inoupstream => null() !< flag: average (do not upstream-weight) the fluid-zone conductance; dev option
     character(len=LENMEMPATH) :: tvg6_mempath = '' !< input memory path of the TVG subpackage
-    real(DP), dimension(:), pointer, contiguous :: zeta => null() !< starting zeta
-    real(DP), dimension(:), pointer, contiguous :: hcof => null() !< hcof contribution to amat
-    real(DP), dimension(:), pointer, contiguous :: rhs => null() !< rhs contribution
+    real(DP), dimension(:), pointer, contiguous :: zeta => null() !< interface elevation from the converged heads
     real(DP), dimension(:), pointer, contiguous :: storage => null() !< calculated swi storage
 
     ! information needed for full implementation
@@ -159,8 +157,6 @@ contains
   !> @brief Create a new swi package object
   !<
   subroutine swi_cr(swi, name_model, input_mempath, inunit, iout, dis)
-    ! modules
-    use MemoryManagerExtModule, only: mem_set_value
     ! dummy
     type(GwfSwiType), pointer :: swi
     character(len=*), intent(in) :: name_model
@@ -284,6 +280,16 @@ contains
     if (.not. associated(this%hfreshold)) then
       call mem_setptr(this%hfreshold, 'XOLD', &
                       create_mem_path(this%name_model))
+    end if
+
+    ! the saltwater head is simulated in a two-fluid model, so it cannot also
+    ! be supplied through TVG
+    if (this%intvg > 0 .and. this%iconfiguration /= FRESHWATER_ONE_FLUID) then
+      call store_error('A TVG file supplies SALTWATER_HEAD, but the model is &
+                       &part of a two-fluid (SWI-SWI) simulation, in which the &
+                       &saltwater head is simulated. Remove the TVG file.', &
+                       terminate=.false.)
+      call store_error_filename(this%input_fname)
     end if
 
     ! If this is a single-fluid freshwater model
@@ -530,8 +536,6 @@ contains
 
     ! deallocate arrays
     call mem_deallocate(this%zeta)
-    call mem_deallocate(this%hcof)
-    call mem_deallocate(this%rhs)
     call mem_deallocate(this%storage)
 
     if (this%iconfiguration == FRESHWATER_ONE_FLUID) then
@@ -552,6 +556,17 @@ contains
 
     ! deallocate parent
     call this%NumericalPackageType%da()
+
+    ! the flow and storage formulation objects; NPF and STO keep pointers to
+    ! them only, so they are freed here
+    if (associated(this%npf_form)) then
+      deallocate (this%npf_form)
+      nullify (this%npf_form)
+    end if
+    if (associated(this%sto_form)) then
+      deallocate (this%sto_form)
+      nullify (this%sto_form)
+    end if
 
     ! the flow-reduction provider
     if (associated(this%flowred)) then
@@ -630,15 +645,11 @@ contains
 
     ! Allocate
     call mem_allocate(this%zeta, nodes, 'ZETA', this%memoryPath)
-    call mem_allocate(this%hcof, nodes, 'HCOF', this%memoryPath)
-    call mem_allocate(this%rhs, nodes, 'RHS', this%memoryPath)
     call mem_allocate(this%storage, nodes, 'STORAGE', this%memoryPath)
 
     ! initialize
     do n = 1, nodes
       this%zeta(n) = DZERO
-      this%hcof(n) = DZERO
-      this%rhs(n) = DZERO
       this%storage(n) = DZERO
     end do
 
@@ -651,7 +662,7 @@ contains
     use SourceCommonModule, only: filein_fname
     use OpenSpecModule, only: access, form
     use InputOutputModule, only: getunit, openfile
-    use MemoryManagerModule, only: mem_setptr, get_isize
+    use MemoryManagerModule, only: mem_setptr
     use MemoryManagerExtModule, only: mem_set_value
     use CharacterStringModule, only: CharacterStringType
     use GwfSwiInputModule, only: GwfSwiParamFoundType
@@ -868,8 +879,11 @@ contains
 
     ! Loop through each node and calculate zeta
     do n = 1, this%dis%nodes
-      ! skip if inactive
-      if (this%ibound(n) == 0) cycle
+      ! inactive cells are written as no-flow cells
+      if (this%ibound(n) == 0) then
+        this%zeta(n) = DHNOFLO
+        cycle
+      end if
 
       ! Calculate zeta
       this%zeta(n) = this%get_zetanew(n)
@@ -1040,6 +1054,9 @@ contains
                     npf%dis%bot(n), npf%dis%bot(m), npf%dis%con%hwva(jas))
       return
     end if
+    ! -- no flow to or from an inactive cell, as in vcond
+    condf = DZERO
+    if (npf%ibound(n) == 0 .or. npf%ibound(m) == 0) return
     ! -- identify the upper (iu) and lower (il) cell; the shared face is at
     !    bot(iu) = top(il)
     if (npf%dis%bot(n) > npf%dis%bot(m)) then

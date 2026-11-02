@@ -59,9 +59,6 @@ module SwiSwiExchangeModule
     procedure :: exg_ac => swi_swi_ac
     procedure :: exg_mc => swi_swi_mc
     procedure :: exg_ar => swi_swi_ar
-    procedure :: exg_rp => swi_swi_rp
-    procedure :: exg_ad => swi_swi_ad
-    procedure :: exg_cf => swi_swi_cf
     procedure :: exg_fc => swi_swi_fc
     procedure :: exg_fn => swi_swi_fn
     procedure :: swi_fn_cross_storage
@@ -400,34 +397,6 @@ contains
                                              this%gwf_salt%xold)
   end subroutine swi_swi_ar
 
-  !> @ brief Read and prepare
-  !<
-  subroutine swi_swi_rp(this)
-    ! modules
-    use TdisModule, only: readnewdata
-    ! dummy
-    class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
-
-    ! -- Check with TDIS on whether or not it is time to RP
-    if (.not. readnewdata) return
-
-  end subroutine swi_swi_rp
-
-  !> @ brief Advance
-  !<
-  subroutine swi_swi_ad(this)
-    ! dummy
-    class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
-  end subroutine swi_swi_ad
-
-  !> @ brief Calculate coefficients
-  !<
-  subroutine swi_swi_cf(this, kiter)
-    ! dummy
-    class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
-    integer(I4B), intent(in) :: kiter
-  end subroutine swi_swi_cf
-
   !> @ brief Fill coefficients
   !!
   !! The SWI-SWI exchange contributes only Newton (Jacobian) cross terms; the
@@ -548,6 +517,11 @@ contains
           cycle
         end if
         m = this%gwf_fresh%dis%con%ja(ipos)
+        ! no flow to or from an inactive cell
+        if (this%gwf_fresh%ibound(n) == 0 .or. this%gwf_fresh%ibound(m) == 0) then
+          idx = idx + 1
+          cycle
+        end if
         csat = this%gwf_fresh%npf%condsat(this%gwf_fresh%npf%dis%con%jas(ipos))
         q = csat * (this%gwf_fresh%x(m) - this%gwf_fresh%x(n))
         if (this%gwf_fresh%x(m) > this%gwf_fresh%x(n)) then
@@ -583,6 +557,11 @@ contains
           cycle
         end if
         m = this%gwf_salt%dis%con%ja(ipos)
+        ! no flow to or from an inactive cell
+        if (this%gwf_salt%ibound(n) == 0 .or. this%gwf_salt%ibound(m) == 0) then
+          idx = idx + 1
+          cycle
+        end if
         csat = this%gwf_salt%npf%condsat(this%gwf_salt%npf%dis%con%jas(ipos))
         q = csat * (this%gwf_salt%x(m) - this%gwf_salt%x(n))
         if (this%gwf_salt%x(m) > this%gwf_salt%x(n)) then

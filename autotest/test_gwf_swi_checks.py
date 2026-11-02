@@ -24,6 +24,9 @@ swi-xt3d, swi-hfb
 swi2f-grid, swi2f-sy
   two-fluid models whose grids (cell bottoms) or specific yields differ; the
   run must stop with an error.
+swi2f-tvg
+  two-fluid freshwater model with a TVG file for the saltwater head, which is
+  simulated in two-fluid mode; the run must stop with an error.
 """
 
 import flopy
@@ -41,13 +44,15 @@ cases = [
     "swi-hfb",
     "swi2f-grid",
     "swi2f-sy",
+    "swi2f-tvg",
 ]
-xfail = [False, False, False, False, True, True, True, True]
+xfail = [False, False, False, False, True, True, True, True, True]
 errors = {
     "swi-xt3d": "cannot be used with XT3D",
     "swi-hfb": "cannot be used with the HFB Package",
     "swi2f-grid": "cell bottoms, and cell areas",
     "swi2f-sy": "Specific yield (SY) must be the same",
+    "swi2f-tvg": "A TVG file supplies SALTWATER_HEAD",
 }
 
 alphaf = 40.0
@@ -185,7 +190,13 @@ def build_two_fluid(ws, case):
         flopy.mf6.ModflowGwfnpf(gwf, icelltype=1, k=10.0)
         sy = 0.25 if (is_salt and case == "swi2f-sy") else 0.2
         flopy.mf6.ModflowGwfsto(gwf, iconvert=1, ss=0.0, sy=sy, transient={0: True})
-        flopy.mf6.ModflowGwfswi(gwf)
+        if case == "swi2f-tvg" and not is_salt:
+            swi = flopy.mf6.ModflowGwfswi(gwf, tvg6_filerecord=f"{mname}.swi.tvg")
+            swi.tvg.initialize(
+                auxiliary=["saltwater_head"], aux={0: [np.full((1, 1, 5), 0.0)]}
+            )
+        else:
+            flopy.mf6.ModflowGwfswi(gwf)
         flopy.mf6.ModflowGwfchd(
             gwf, stress_period_data=[[(0, 0, 0), 0.0], [(0, 0, 4), 0.0]]
         )
