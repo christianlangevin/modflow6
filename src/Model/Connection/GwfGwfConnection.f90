@@ -648,7 +648,7 @@ contains
           isym = imCon%jas(ipos)
           ihc = imCon%ihc(isym)
           area = imCon%hwva(isym)
-          satThick = imNpf%calcSatThickness(n, m, ihc)
+          satThick = imNpf%calcSatThickness(n, m, ihc, ipos)
           rrate = this%gwfInterfaceModel%flowja(ipos)
 
           call imDis%connection_normal(n, m, ihc, nx, ny, nz, ipos)

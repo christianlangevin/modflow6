@@ -57,11 +57,14 @@ module GwfBuyModule
     procedure :: buy_cf
     procedure :: buy_cf_bnd
     procedure :: buy_fc
+    procedure :: buy_fn
     procedure :: buy_ot_dv
     procedure :: buy_cq
     procedure :: buy_da
     procedure, private :: calcbuy
     procedure, private :: calchhterms
+    procedure, private :: calc_gbuy
+    procedure, private :: buy_calc_dhdrive
     procedure, private :: buy_calcdens
     procedure, private :: buy_calcelev
     procedure :: allocate_scalars
@@ -293,7 +296,45 @@ contains
         call this%buy_calcelev()
       end if
     end if
+    !
+    ! -- Provide the buoyancy driving term to NPF so that the Newton
+    !    upstream cell is selected from the full flow direction
+    if (this%npf%inewton /= 0) then
+      call this%buy_calc_dhdrive(this%npf%hnew)
+    end if
   end subroutine buy_cf
+
+  !> @brief Calculate the buoyancy driving term for each connection
+  !!
+  !! With the Newton formulation the conductance of a horizontal connection
+  !! is the saturated conductance multiplied by the saturation of the
+  !! upstream cell. The buoyancy flow is generally not zero when the heads
+  !! of the two cells are equal, so the upstream cell must be selected from
+  !! the direction of the total (head plus buoyancy) flow; otherwise the
+  !! flow jumps when the order of two nearly equal heads changes. The
+  !! buoyancy term per unit conductance is stored in npf%dhdrive, which is
+  !! used by NPF and BUY to select the upstream cell.
+  !<
+  subroutine buy_calc_dhdrive(this, hnew)
+    ! -- dummy
+    class(GwfBuyType) :: this
+    real(DP), intent(in), dimension(:) :: hnew
+    ! -- local
+    integer(I4B) :: n, m, ipos, isympos
+    !
+    do n = 1, this%dis%nodes
+      do ipos = this%dis%con%ia(n) + 1, this%dis%con%ia(n + 1) - 1
+        m = this%dis%con%ja(ipos)
+        if (m < n) cycle
+        isympos = this%dis%con%jas(ipos)
+        this%npf%dhdrive(isympos) = DZERO
+        if (this%dis%con%ihc(isympos) == 0) cycle
+        if (this%ibound(n) == 0 .or. this%ibound(m) == 0) cycle
+        this%npf%dhdrive(isympos) = this%calc_gbuy(n, m, ipos, hnew(n), &
+                                                   hnew(m))
+      end do
+    end do
+  end subroutine buy_calc_dhdrive
 
   !> @brief Fill coefficients
   !<
@@ -828,6 +869,83 @@ contains
     end do
   end subroutine buy_fc
 
+  !> @brief Fill Newton terms
+  !!
+  !! Add the derivative of the buoyancy flow with respect to the head of
+  !! the upstream cell, through the upstream saturation that scales the
+  !! conductance of a horizontal connection. NPF adds the corresponding
+  !! term for the head-difference part of the flow.
+  !<
+  subroutine buy_fn(this, kiter, matrix_sln, idxglo, rhs, hnew)
+    ! -- modules
+    use SmoothingModule, only: sQuadraticSaturationDerivative
+    use GwfConductanceUtilsModule, only: upstream_is_n
+    ! -- dummy
+    class(GwfBuyType) :: this
+    integer(I4B) :: kiter
+    class(MatrixBaseType), pointer :: matrix_sln
+    integer(I4B), intent(in), dimension(:) :: idxglo
+    real(DP), dimension(:), intent(inout) :: rhs
+    real(DP), intent(inout), dimension(:) :: hnew
+    ! -- local
+    integer(I4B) :: n, m, ipos, isympos, isymcon
+    integer(I4B) :: idiag, idiagm, iups, ihc
+    real(DP) :: gbuy, derv, term, topup, botup
+    !
+    do n = 1, this%dis%nodes
+      if (this%ibound(n) == 0) cycle
+      idiag = this%dis%con%ia(n)
+      do ipos = this%dis%con%ia(n) + 1, this%dis%con%ia(n + 1) - 1
+        m = this%dis%con%ja(ipos)
+        if (m < n) cycle
+        if (this%ibound(m) == 0) cycle
+        isympos = this%dis%con%jas(ipos)
+        ihc = this%dis%con%ihc(isympos)
+        if (ihc == 0) cycle
+        !
+        ! -- buoyancy flow into n per unit conductance
+        gbuy = this%calc_gbuy(n, m, ipos, hnew(n), hnew(m))
+        if (gbuy == DZERO) cycle
+        !
+        ! -- upstream cell, consistent with npf
+        iups = m
+        if (upstream_is_n(hnew(n), hnew(m), this%npf%get_dhdrive(n, m, ipos))) &
+          iups = n
+        if (this%npf%icelltype(iups) == 0) cycle
+        !
+        ! -- upstream top and bottom, as in npf
+        topup = this%dis%top(iups)
+        botup = this%dis%bot(iups)
+        if (ihc == 2) then
+          topup = min(this%dis%top(n), this%dis%top(m))
+          botup = max(this%dis%bot(n), this%dis%bot(m))
+        end if
+        derv = sQuadraticSaturationDerivative(topup, botup, hnew(iups), &
+                                              this%npf%satomega)
+        !
+        ! -- derivative of the buoyancy flow into n w.r.t. the upstream head
+        term = this%npf%condsat(isympos) * derv * gbuy
+        isymcon = this%dis%con%isym(ipos)
+        idiagm = this%dis%con%ia(m)
+        if (iups == n) then
+          rhs(n) = rhs(n) + term * hnew(n)
+          rhs(m) = rhs(m) - term * hnew(n)
+          call matrix_sln%add_value_pos(idxglo(idiag), term)
+          if (this%ibound(m) > 0) then
+            call matrix_sln%add_value_pos(idxglo(isymcon), -term)
+          end if
+        else
+          rhs(n) = rhs(n) + term * hnew(m)
+          rhs(m) = rhs(m) - term * hnew(m)
+          if (this%ibound(n) > 0) then
+            call matrix_sln%add_value_pos(idxglo(ipos), term)
+          end if
+          call matrix_sln%add_value_pos(idxglo(idiagm), -term)
+        end if
+      end do
+    end do
+  end subroutine buy_fn
+
   !> @brief Save density array to binary file
   !<
   subroutine buy_ot_dv(this, idvfl)
@@ -1143,7 +1261,8 @@ contains
                    this%dis%bot(n), this%dis%bot(m), &
                    this%dis%con%cl1(this%dis%con%jas(icon)), &
                    this%dis%con%cl2(this%dis%con%jas(icon)), &
-                   this%dis%con%hwva(this%dis%con%jas(icon)))
+                   this%dis%con%hwva(this%dis%con%jas(icon)), &
+                   this%npf%get_dhdrive(n, m, icon))
     end if
     !
     ! -- Calculate buoyancy term
@@ -1222,7 +1341,8 @@ contains
                    this%dis%bot(n), this%dis%bot(m), &
                    this%dis%con%cl1(this%dis%con%jas(icon)), &
                    this%dis%con%cl2(this%dis%con%jas(icon)), &
-                   this%dis%con%hwva(this%dis%con%jas(icon)))
+                   this%dis%con%hwva(this%dis%con%jas(icon)), &
+                   this%npf%get_dhdrive(n, m, icon))
     end if
     !
     ! -- Calculate terms
@@ -1242,6 +1362,64 @@ contains
       amatnm = amatnm + cond * wt * (rhonormm - rhonormn)
     end if
   end subroutine calchhterms
+
+  !> @brief Buoyancy flow per unit conductance for this connection
+  !!
+  !! Returns the buoyancy part of the flow from m into n divided by the
+  !! conductance, so that the total flow is cond * (hm - hn + gbuy). It is
+  !! zero when the densities of both cells equal the reference density.
+  !<
+  function calc_gbuy(this, n, m, icon, hn, hm) result(gbuy)
+    ! -- dummy
+    class(GwfBuyType) :: this
+    integer(I4B), intent(in) :: n
+    integer(I4B), intent(in) :: m
+    integer(I4B), intent(in) :: icon
+    real(DP), intent(in) :: hn
+    real(DP), intent(in) :: hm
+    ! -- return
+    real(DP) :: gbuy
+    ! -- local
+    real(DP) :: cl1, cl2, wt, elevn, elevm, elevnm
+    real(DP) :: rhonormn, rhonormm, rhoterm
+    real(DP) :: tp, bt
+    !
+    ! -- distance weight
+    if (m > n) then
+      cl1 = this%dis%con%cl1(this%dis%con%jas(icon))
+      cl2 = this%dis%con%cl2(this%dis%con%jas(icon))
+    else
+      cl1 = this%dis%con%cl2(this%dis%con%jas(icon))
+      cl2 = this%dis%con%cl1(this%dis%con%jas(icon))
+    end if
+    wt = cl1 / (cl1 + cl2)
+    rhonormn = this%dense(n) / this%denseref
+    rhonormm = this%dense(m) / this%denseref
+    rhoterm = wt * rhonormn + (DONE - wt) * rhonormm
+    !
+    if (this%iform == 0) then
+      ! -- equivalent freshwater head formulation, as in calcbuy
+      if (this%ireadelev == 0) then
+        tp = this%dis%top(n)
+        bt = this%dis%bot(n)
+        elevn = bt + DHALF * this%npf%sat(n) * (tp - bt)
+        tp = this%dis%top(m)
+        bt = this%dis%bot(m)
+        elevm = bt + DHALF * this%npf%sat(m) * (tp - bt)
+      else
+        elevn = this%elev(n)
+        elevm = this%elev(m)
+      end if
+      gbuy = (rhoterm - DONE) * (elevm - elevn)
+    else
+      ! -- hydraulic head formulation, as in calchhterms
+      elevn = this%elev(n)
+      elevm = this%elev(m)
+      elevnm = (DONE - wt) * elevn + wt * elevm
+      gbuy = (rhoterm - DONE) * (hm - hn) + &
+             (rhonormm - rhonormn) * ((DONE - wt) * hn + wt * hm - elevnm)
+    end if
+  end function calc_gbuy
 
   !> @brief calculate fluid density from concentration
   !<

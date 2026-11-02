@@ -23,7 +23,7 @@ module GwfNpfModule
   use MatrixBaseModule
   use HGeoUtilModule, only: hyeff
   use GwfConductanceUtilsModule, only: hcond, vcond, &
-                                       condmean, thksatnm, &
+                                       condmean, thksatnm, upstream_is_n, &
                                        CCOND_HMEAN
   use GwfNpfFormulationModule, only: GwfNpfFormulationType, &
                                      GwfNpfFormContainerType, &
@@ -91,6 +91,7 @@ module GwfNpfModule
     real(DP), dimension(:), pointer, contiguous :: wetdry => null() !< wetdry array
     real(DP), dimension(:), pointer, contiguous :: sat => null() !< saturation (0. to 1.) for each cell
     real(DP), dimension(:), pointer, contiguous :: condsat => null() !< saturated conductance (symmetric array)
+    real(DP), dimension(:), pointer, contiguous :: dhdrive => null() !< head-equivalent driving term added to h(m) - h(n), n < m, when selecting the Newton upstream cell (symmetric array, set by BUY)
     integer(I4B), dimension(:), pointer, contiguous :: ibotnode => null() !< bottom node used if igwfnewtonur /= 0
     ! spdis machinery:
     real(DP), dimension(:, :), pointer, contiguous :: spdis => null() !< specific discharge : qx, qy, qz (nodes, 3)
@@ -138,6 +139,7 @@ module GwfNpfModule
     procedure :: increase_edge_count
     procedure :: set_edge_properties
     procedure :: calcSatThickness
+    procedure :: get_dhdrive
     procedure :: add_flow_formulation
     ! private
     procedure, private :: thksat => sgwf_npf_thksat
@@ -659,7 +661,8 @@ contains
                    this%dis%bot(n), this%dis%bot(m), &
                    this%dis%con%cl1(this%dis%con%jas(ipos)), &
                    this%dis%con%cl2(this%dis%con%jas(ipos)), &
-                   this%dis%con%hwva(this%dis%con%jas(ipos)))
+                   this%dis%con%hwva(this%dis%con%jas(ipos)), &
+                   this%get_dhdrive(n, m, ipos))
     end if
 
     ! Fill row n
@@ -839,9 +842,9 @@ contains
       return
     end if
 
-    ! determine upstream node
+    ! determine upstream node from the full driving term
     iups = m
-    if (hnew(m) < hnew(n)) iups = n
+    if (upstream_is_n(hnew(n), hnew(m), this%get_dhdrive(n, m, ipos))) iups = n
     idn = n
     if (iups == n) idn = m
     !
@@ -1103,7 +1106,8 @@ contains
                      this%dis%bot(n), this%dis%bot(m), &
                      this%dis%con%cl1(this%dis%con%jas(icon)), &
                      this%dis%con%cl2(this%dis%con%jas(icon)), &
-                     this%dis%con%hwva(this%dis%con%jas(icon)))
+                     this%dis%con%hwva(this%dis%con%jas(icon)), &
+                     this%get_dhdrive(n, m, icon))
     end if
     !
     ! -- Initialize hntemp and hmtemp
@@ -1283,6 +1287,7 @@ contains
     call mem_deallocate(this%k33input)
     call mem_deallocate(this%sat, 'SAT', this%memoryPath)
     call mem_deallocate(this%condsat)
+    call mem_deallocate(this%dhdrive)
     call mem_deallocate(this%wetdry)
     call mem_deallocate(this%angle1)
     call mem_deallocate(this%angle2)
@@ -1449,6 +1454,10 @@ contains
     call mem_allocate(this%krel, ncells, 'KREL', this%memoryPath)
     call mem_allocate(this%sat, ncells, 'SAT', this%memoryPath)
     call mem_allocate(this%condsat, njas, 'CONDSAT', this%memoryPath)
+    call mem_allocate(this%dhdrive, njas, 'DHDRIVE', this%memoryPath)
+    do n = 1, njas
+      this%dhdrive(n) = DZERO
+    end do
     !
     ! -- Optional arrays dimensioned to full size initially
     call mem_allocate(this%k22, ncells, 'K22', this%memoryPath)
@@ -2784,7 +2793,7 @@ contains
                         this%inewton, ihc, &
                         this%hnew(n), this%hnew(m), this%sat(n), this%sat(m), &
                         this%dis%top(n), this%dis%top(m), this%dis%bot(n), &
-                        this%dis%bot(m))
+                        this%dis%bot(m), this%get_dhdrive(n, m, ipos))
           area = area * dz
           call this%dis%connection_normal(n, m, ihc, xn, yn, zn, ipos)
           call this%dis%connection_vector(n, m, nozee, this%sat(n), this%sat(m), &
@@ -3105,14 +3114,20 @@ contains
 
   !> Calculate saturated thickness between cell n and m
   !<
-  function calcSatThickness(this, n, m, ihc) result(satThickness)
+  function calcSatThickness(this, n, m, ihc, ipos) result(satThickness)
     ! -- dummy
     class(GwfNpfType) :: this !< this NPF instance
     integer(I4B) :: n !< node n
     integer(I4B) :: m !< node m
     integer(I4B) :: ihc !< 1 = horizontal connection, 0 for vertical
+    integer(I4B), optional :: ipos !< connection position, used to select the Newton upstream cell
     ! -- return
     real(DP) :: satThickness !< saturated thickness
+    ! -- local
+    real(DP) :: dh
+    !
+    dh = DZERO
+    if (present(ipos)) dh = this%get_dhdrive(n, m, ipos)
     !
     satThickness = thksatnm(this%ibound(n), &
                             this%ibound(m), &
@@ -3127,8 +3142,29 @@ contains
                             this%dis%top(n), &
                             this%dis%top(m), &
                             this%dis%bot(n), &
-                            this%dis%bot(m))
+                            this%dis%bot(m), &
+                            dh)
   end function calcSatThickness
+
+  !> @brief Head-equivalent driving term for the upstream selection
+  !!
+  !! Returns the term added to h(m) - h(n) when selecting the Newton
+  !! upstream cell for the connection between n and m, oriented for
+  !! flow from m into n. It is zero unless set by another package
+  !! (the BUY package).
+  !<
+  function get_dhdrive(this, n, m, ipos) result(dh)
+    ! -- dummy
+    class(GwfNpfType) :: this !< this NPF instance
+    integer(I4B), intent(in) :: n !< node n
+    integer(I4B), intent(in) :: m !< node m
+    integer(I4B), intent(in) :: ipos !< position of connection n-m
+    ! -- return
+    real(DP) :: dh !< driving term for flow from m into n
+    !
+    dh = this%dhdrive(this%dis%con%jas(ipos))
+    if (n > m) dh = -dh
+  end function get_dhdrive
 
   subroutine add_flow_formulation(this, npf_form, form_id)
     class(GwfNpfType), intent(inout) :: this !< this NPF instance

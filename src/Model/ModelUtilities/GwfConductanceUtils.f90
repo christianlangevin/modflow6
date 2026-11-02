@@ -8,7 +8,7 @@
 !!
 !<
 module GwfConductanceUtilsModule
-  use KindModule, only: DP, I4B
+  use KindModule, only: DP, I4B, LGP
   use ConstantsModule, only: DZERO, DHALF, DONE, &
                              DLNLOW, DLNHIGH, &
                              C3D_STAGGERED
@@ -19,6 +19,7 @@ module GwfConductanceUtilsModule
   public :: vcond
   public :: condmean
   public :: thksatnm
+  public :: upstream_is_n
   public :: staggered_thkfrac
   public :: CCOND_HMEAN
 
@@ -42,7 +43,7 @@ contains
   !<
   function hcond(ibdn, ibdm, ictn, ictm, iupstream, ihc, icellavg, &
                  condsat, hn, hm, satn, satm, hkn, hkm, topn, topm, &
-                 botn, botm, cln, clm, fawidth) &
+                 botn, botm, cln, clm, fawidth, dhdrive) &
     result(condnm)
     ! return variable
     real(DP) :: condnm !< horizontal conductance between two cells
@@ -68,6 +69,12 @@ contains
     real(DP), intent(in) :: cln !< distance from the center of cell n to the shared face with cell m
     real(DP), intent(in) :: clm !< distance from the center of cell m to the shared face with cell n
     real(DP), intent(in) :: fawidth !< width of cell perpendicular to flow
+    real(DP), intent(in), optional :: dhdrive !< head-equivalent driving term added to hm - hn when selecting the upstream cell
+    ! local
+    real(DP) :: dh
+
+    dh = DZERO
+    if (present(dhdrive)) dh = dhdrive
 
     ! n or m is inactive
     if (ibdn == 0 .or. ibdm == 0) then
@@ -76,7 +83,7 @@ contains
     elseif (ictn == 0 .and. ictm == 0) then
       condnm = condsat
     else if (iupstream == 1) then
-      condnm = convertible_upstream(hn, hm, satn, satm, condsat)
+      condnm = convertible_upstream(hn, hm, satn, satm, condsat, dh)
     else
       condnm = convertible_standard(ihc, icellavg, &
                                     satn, satm, hkn, hkm, &
@@ -87,7 +94,7 @@ contains
 
   !> @brief Convertible cell(s) with upstream weighted horizontal conductance
   !<
-  function convertible_upstream(hn, hm, satn, satm, condsat) &
+  function convertible_upstream(hn, hm, satn, satm, condsat, dhdrive) &
     result(condnm)
     ! return variable
     real(DP) :: condnm !< horizontal conductance between two cells
@@ -97,16 +104,37 @@ contains
     real(DP), intent(in) :: hm !< cell m head
     real(DP), intent(in) :: satn !< cell n wetted cell fraction
     real(DP), intent(in) :: satm !< cell m wetted cell fraction
+    real(DP), intent(in) :: dhdrive !< head-equivalent driving term added to hm - hn
     !  local
     real(DP) :: sat_up
 
-    if (hn > hm) then
+    if (upstream_is_n(hn, hm, dhdrive)) then
       sat_up = satn
     else
       sat_up = satm
     end if
     condnm = sat_up * condsat
   end function convertible_upstream
+
+  !> @brief Return true if cell n is upstream of cell m
+  !!
+  !! The flow from m into n is proportional to hm - hn + dhdrive, where
+  !! dhdrive is a head-equivalent driving term in addition to the head
+  !! difference (for example, the buoyancy term of the BUY package). The
+  !! upstream cell is selected from the sign of this full driving term so
+  !! that the product of the flow and the upstream saturation is continuous.
+  !! With dhdrive = 0 this reduces to hn > hm.
+  !<
+  pure function upstream_is_n(hn, hm, dhdrive) result(isn)
+    ! return variable
+    logical(LGP) :: isn !< true if cell n is the upstream cell
+    ! dummy
+    real(DP), intent(in) :: hn !< cell n head
+    real(DP), intent(in) :: hm !< cell m head
+    real(DP), intent(in) :: dhdrive !< head-equivalent driving term added to hm - hn
+
+    isn = (hn > hm + dhdrive)
+  end function upstream_is_n
 
   !> @brief Convertible cell(s) with standard weighted horizontal conductance
   !<
@@ -317,7 +345,8 @@ contains
   !> @brief Calculate wetted cell thickness at interface between two cells
   !<
   function thksatnm(ibdn, ibdm, ictn, ictm, iupstream, ihc, &
-                    hn, hm, satn, satm, topn, topm, botn, botm) result(res)
+                    hn, hm, satn, satm, topn, topm, botn, botm, &
+                    dhdrive) result(res)
     ! return variable
     real(DP) :: res !< wetted cell thickness for connection nm
     ! dummy
@@ -335,11 +364,16 @@ contains
     real(DP), intent(in) :: topm !< top of cell m
     real(DP), intent(in) :: botn !< bottom of cell n
     real(DP), intent(in) :: botm !< bottom of cell m
+    real(DP), intent(in), optional :: dhdrive !< head-equivalent driving term added to hm - hn when selecting the upstream cell
     ! local
     real(DP) :: thksatn
     real(DP) :: thksatm
     real(DP) :: sill_top
     real(DP) :: sill_bot
+    real(DP) :: dh
+    !
+    dh = DZERO
+    if (present(dhdrive)) dh = dhdrive
     !
     ! n or m is inactive
     if (ibdn == 0 .or. ibdm == 0) then
@@ -361,7 +395,7 @@ contains
       !
       ! At least one of the cells is convertible
     elseif (iupstream == 1) then
-      if (hn > hm) then
+      if (upstream_is_n(hn, hm, dh)) then
         res = satn * (topn - botn)
       else
         res = satm * (topm - botm)
