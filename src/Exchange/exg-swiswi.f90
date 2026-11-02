@@ -311,7 +311,7 @@ contains
     class(MatrixBaseType), pointer :: matrix_sln !< the system matrix
     ! local
     integer(I4B) :: n, iglo, jglo
-    integer(I4B) :: ipos, m, idx
+    integer(I4B) :: ipos, m
 
     ! map same-cell fresh<->salt connections (must match swi_swi_ac inclusion)
     if (this%inocrossstorage == 0 .or. this%inocrossflow == 0) then
@@ -325,27 +325,23 @@ contains
 
     ! map cross-flow neighbor connections (must match swi_swi_ac inclusion)
     if (this%inocrossflow == 0) then
-      ! fresh node to salt nodes
-      idx = 1
+      ! fresh node to salt nodes, indexed by connection position
       do n = 1, this%gwf_fresh%dis%nodes
         iglo = n + this%gwf_fresh%moffset
         do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
           m = this%gwf_salt%dis%con%ja(ipos)
           jglo = m + this%gwf_salt%moffset
-          this%idxjasalt(idx) = matrix_sln%get_position(iglo, jglo)
-          idx = idx + 1
+          this%idxjasalt(ipos) = matrix_sln%get_position(iglo, jglo)
         end do
       end do
-      ! salt node to fresh nodes
-      idx = 1
+      ! salt node to fresh nodes, indexed by connection position
       do n = 1, this%gwf_salt%dis%nodes
         iglo = n + this%gwf_salt%moffset
         do ipos = this%gwf_fresh%dis%con%ia(n), &
           this%gwf_fresh%dis%con%ia(n + 1) - 1
           m = this%gwf_fresh%dis%con%ja(ipos)
           jglo = m + this%gwf_fresh%moffset
-          this%idxjafresh(idx) = matrix_sln%get_position(iglo, jglo)
-          idx = idx + 1
+          this%idxjafresh(ipos) = matrix_sln%get_position(iglo, jglo)
         end do
       end do
     end if
@@ -496,90 +492,68 @@ contains
     class(SwiSwiExchangeType) :: this !<  SwiSwiExchangeType
     class(MatrixBaseType), pointer :: matrix_sln
     ! local
-    integer(I4B) :: n, ipos, m, idx, ihc
+    integer(I4B) :: n, ipos, m, ihc
     real(DP) :: termf, terms, csat, q
+
+    ! The two models share the same grid (checked in swi_swi_df), so ipos
+    ! indexes the same connection in both, and idxjasalt and idxjafresh are
+    ! indexed by ipos. The diagonal position ia(n) is skipped.
 
     ! FRESHWATER EQUATIONS: the saltwater head in a connected cell affects the
     ! freshwater zone conductance, so it enters the freshwater equation.
-    idx = 1
-    do n = 1, this%gwf_fresh%dis%nodes
-      do ipos = this%gwf_fresh%dis%con%ia(n), &
-        this%gwf_fresh%dis%con%ia(n + 1) - 1
-        ! the first position is the diagonal, which has no connection
-        if (ipos == this%gwf_fresh%dis%con%ia(n)) then
-          idx = idx + 1
-          cycle
-        end if
-        ihc = this%gwf_fresh%npf%dis%con%ihc( &
-              this%gwf_fresh%npf%dis%con%jas(ipos))
-        if (ihc == C3D_VERTICAL) then
-          idx = idx + 1
-          cycle
-        end if
-        m = this%gwf_fresh%dis%con%ja(ipos)
-        ! no flow to or from an inactive cell
-        if (this%gwf_fresh%ibound(n) == 0 .or. this%gwf_fresh%ibound(m) == 0) then
-          idx = idx + 1
-          cycle
-        end if
-        csat = this%gwf_fresh%npf%condsat(this%gwf_fresh%npf%dis%con%jas(ipos))
-        q = csat * (this%gwf_fresh%x(m) - this%gwf_fresh%x(n))
-        if (this%gwf_fresh%x(m) > this%gwf_fresh%x(n)) then
-          ! m is upstream: hs(m) affects the conductance
-          termf = this%get_dsfdhs(m, 2) * q
-          call matrix_sln%add_value_pos(this%idxjasalt(idx), termf)
-          this%gwf_fresh%rhs(n) = this%gwf_fresh%rhs(n) + &
-                                  termf * this%gwf_salt%x(m)
-        else
-          ! n is upstream: hs(n) affects the conductance
-          termf = this%get_dsfdhs(n, 2) * q
-          call matrix_sln%add_value_pos(this%idxglo(n), termf)
-          this%gwf_fresh%rhs(n) = this%gwf_fresh%rhs(n) + &
-                                  termf * this%gwf_salt%x(n)
-        end if
-        idx = idx + 1
+    associate (con => this%gwf_fresh%dis%con, ibound => this%gwf_fresh%ibound, &
+               hf => this%gwf_fresh%x, hs => this%gwf_salt%x)
+      do n = 1, this%gwf_fresh%dis%nodes
+        if (ibound(n) == 0) cycle
+        do ipos = con%ia(n) + 1, con%ia(n + 1) - 1
+          m = con%ja(ipos)
+          if (ibound(m) == 0) cycle
+          ihc = con%ihc(con%jas(ipos))
+          if (ihc == C3D_VERTICAL) cycle
+          csat = this%gwf_fresh%npf%condsat(con%jas(ipos))
+          q = csat * (hf(m) - hf(n))
+          if (hf(m) > hf(n)) then
+            ! m is upstream: hs(m) affects the conductance
+            termf = this%get_dsfdhs(m, 2) * q
+            call matrix_sln%add_value_pos(this%idxjasalt(ipos), termf)
+            this%gwf_fresh%rhs(n) = this%gwf_fresh%rhs(n) + termf * hs(m)
+          else
+            ! n is upstream: hs(n) affects the conductance
+            termf = this%get_dsfdhs(n, 2) * q
+            call matrix_sln%add_value_pos(this%idxglo(n), termf)
+            this%gwf_fresh%rhs(n) = this%gwf_fresh%rhs(n) + termf * hs(n)
+          end if
+        end do
       end do
-    end do
+    end associate
 
     ! SALTWATER EQUATIONS: the freshwater head in a connected cell affects the
     ! saltwater zone conductance, so it enters the saltwater equation.
-    idx = 1
-    do n = 1, this%gwf_salt%dis%nodes
-      do ipos = this%gwf_salt%dis%con%ia(n), this%gwf_salt%dis%con%ia(n + 1) - 1
-        ! the first position is the diagonal, which has no connection
-        if (ipos == this%gwf_salt%dis%con%ia(n)) then
-          idx = idx + 1
-          cycle
-        end if
-        ihc = this%gwf_salt%npf%dis%con%ihc(this%gwf_salt%npf%dis%con%jas(ipos))
-        if (ihc == C3D_VERTICAL) then
-          idx = idx + 1
-          cycle
-        end if
-        m = this%gwf_salt%dis%con%ja(ipos)
-        ! no flow to or from an inactive cell
-        if (this%gwf_salt%ibound(n) == 0 .or. this%gwf_salt%ibound(m) == 0) then
-          idx = idx + 1
-          cycle
-        end if
-        csat = this%gwf_salt%npf%condsat(this%gwf_salt%npf%dis%con%jas(ipos))
-        q = csat * (this%gwf_salt%x(m) - this%gwf_salt%x(n))
-        if (this%gwf_salt%x(m) > this%gwf_salt%x(n)) then
-          ! m is upstream: hf(m) affects the conductance
-          terms = this%get_dssdhf(m, 2) * q
-          call matrix_sln%add_value_pos(this%idxjafresh(idx), terms)
-          this%gwf_salt%rhs(n) = this%gwf_salt%rhs(n) + &
-                                 terms * this%gwf_fresh%x(m)
-        else
-          ! n is upstream: hf(n) affects the conductance
-          terms = this%get_dssdhf(n, 2) * q
-          call matrix_sln%add_value_pos(this%idxsymglo(n), terms)
-          this%gwf_salt%rhs(n) = this%gwf_salt%rhs(n) + &
-                                 terms * this%gwf_fresh%x(n)
-        end if
-        idx = idx + 1
+    associate (con => this%gwf_salt%dis%con, ibound => this%gwf_salt%ibound, &
+               hf => this%gwf_fresh%x, hs => this%gwf_salt%x)
+      do n = 1, this%gwf_salt%dis%nodes
+        if (ibound(n) == 0) cycle
+        do ipos = con%ia(n) + 1, con%ia(n + 1) - 1
+          m = con%ja(ipos)
+          if (ibound(m) == 0) cycle
+          ihc = con%ihc(con%jas(ipos))
+          if (ihc == C3D_VERTICAL) cycle
+          csat = this%gwf_salt%npf%condsat(con%jas(ipos))
+          q = csat * (hs(m) - hs(n))
+          if (hs(m) > hs(n)) then
+            ! m is upstream: hf(m) affects the conductance
+            terms = this%get_dssdhf(m, 2) * q
+            call matrix_sln%add_value_pos(this%idxjafresh(ipos), terms)
+            this%gwf_salt%rhs(n) = this%gwf_salt%rhs(n) + terms * hf(m)
+          else
+            ! n is upstream: hf(n) affects the conductance
+            terms = this%get_dssdhf(n, 2) * q
+            call matrix_sln%add_value_pos(this%idxsymglo(n), terms)
+            this%gwf_salt%rhs(n) = this%gwf_salt%rhs(n) + terms * hf(n)
+          end if
+        end do
       end do
-    end do
+    end associate
 
   end subroutine swi_fn_cross_flow
 
